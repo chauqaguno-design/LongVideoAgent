@@ -317,6 +317,7 @@ function renderResults() {
     const text = element("span", "record-text");
     text.append(element("strong", null, title));
     if (detail) text.append(element("small", null, detail));
+    if (row.translation_error) text.append(element("small", null, row.translation_error));
     const time = element("span", "record-time", duration(row.start_ms, true) + " – " + duration(row.end_ms, true));
     button.append(time, text, element("span", "record-arrow", view === "evidence" ? "▶" : "›"));
     button.onclick = () => {
@@ -327,6 +328,11 @@ function renderResults() {
       state.track = ""; state.limit = PAGE_SIZE; renderResults();
     };
     list.append(button);
+    if (view === "evidence" && row.original_text) {
+      const original = element("details", "action-original");
+      original.append(element("summary", null, "查看英文原文"), element("p", null, row.original_text));
+      list.append(original);
+    }
   }
   $("more").hidden = items.length <= state.limit;
 }

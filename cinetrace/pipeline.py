@@ -10,6 +10,10 @@ TRACKS = {"subtitles": ("字幕", subtitle_batches), "visual": ("画面动作", 
           "speech": ("语音", speech_batches)}
 
 
+def scene_summary(quotes):
+    return " · ".join(f"{TRACKS[row['track']][0]}：{row['text'][:120]}" for row in quotes)
+
+
 def timeline(duration, evidence):
     """Choose boundaries close to a sentence end and link crossing evidence to both windows."""
     chunks, scenes = [], []
@@ -32,7 +36,7 @@ def timeline(duration, evidence):
         for key in ids:
             row = by_id[key]
             quotes.setdefault(row["track"], row)
-        summary = " · ".join(f"{TRACKS[track][0]}：{row['text'][:120]}" for track, row in quotes.items())
+        summary = scene_summary(quotes.values())
         scenes.append({
             "id": f"scene-{group[0]['start_ms']}", "title": f"场景 {len(scenes) + 1}",
             "start_ms": group[0]["start_ms"], "end_ms": group[-1]["end_ms"],

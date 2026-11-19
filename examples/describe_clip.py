@@ -33,7 +33,7 @@ def post_clip(path, duration, base_url, key):
         raise ValueError("请提供非空 MP4，Base64 编码后需小于 10 MB。")
     data = base64.b64encode(path.read_bytes()).decode("ascii")
     prompt = (
-        f"只描述画面可见的动作，用 0 到 {duration:g} 之间的片内秒数标注起止。"
+        f"用简体中文描述画面可见的动作，用 0 到 {duration:g} 之间的片内秒数标注起止。"
         '只输出 JSON 对象，格式为 {"events":[{"start_s":1.0,"end_s":2.5,"action":"动作描述"}]}。'
         '没有可确认的动作时返回 {"events":[]}，不推断人物台词。'
     )

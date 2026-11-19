@@ -23,11 +23,12 @@ Copy-Item .env.example .env
 | 动作 | 配置同一百炼工作空间的 `DASHSCOPE_BASE_URL` 和 `DASHSCOPE_API_KEY`，系统会把移除音轨的短片发给 `qwen3-vl-plus`。需要在本机运行时，可用下方 SmolVLM2 配置。原片始终保存在本机。 |
 | 字幕 | 自动读取内封文本字幕。烧录或位图字幕可通过 `CINETRACE_OCR=1` 启用本地 PP-OCRv5。 |
 
-本地动作模型可以在无声音、无字幕的视频上生成英文观察。它给出片段范围，人物关系和短动作需要回看原片核对。程序优先使用已配置的百炼账号。
+本地动作模型可以分析无声、无字幕的视频。工作台将英文画面观察离线翻译为简体中文，同时更新场景摘要中的动作描述。在动作证据下点「查看英文原文」即可核对。已上传的素材可直接查看，译文缓存在本机 SQLite 中。动作时间标到片段范围，人物关系和短动作可回看原片核对。
 
 ```powershell
 .\.venv\Scripts\python -m pip install -r requirements-local-vision.txt
 .\.venv\Scripts\hf download HuggingFaceTB/SmolVLM2-256M-Video-Instruct --exclude 'onnx/*' --local-dir data/models/SmolVLM2-256M-Video-Instruct
+.\.venv\Scripts\hf download Helsinki-NLP/opus-mt-en-zh --revision 408d9bc410a388e1d9aef112a2daba955b945255 --include '*.json' '*.spm' 'pytorch_model.bin' --local-dir data/models/opus-mt-en-zh
 ```
 
 在 `.env` 中设置 `CINETRACE_LOCAL_VISION=data/models/SmolVLM2-256M-Video-Instruct`。要启用烧录字幕识别，安装 `paddlepaddle==3.2.2` 和 `paddleocr==3.3.2`，再设置 `CINETRACE_OCR=1`。PP-OCRv5 的检测和识别权重会在首次使用时下载。完成配置后可在原任务上点击「重试未完成的处理」，复用已完成的轨道。

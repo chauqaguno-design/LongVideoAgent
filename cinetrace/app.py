@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import pipeline
 from .dispatch import kafka_notifications
+from .presentation import chinese_actions
 from .storage import PART_SIZE, Store
 
 
@@ -123,12 +124,13 @@ def complete(video_id: str, request: Request, body: Complete | None = None):
     expected = body.sha256.lower() if body and body.sha256 else None
     store.finish_upload(video_id, expected, pipeline.probe)
     request.app.state.worker.wake.set()
-    return store.video(video_id)
+    return get_video(video_id, request)
 
 
 @app.get("/api/videos/{video_id}")
 def get_video(video_id: str, request: Request):
-    return request.app.state.store.video(video_id)
+    store = request.app.state.store
+    return chinese_actions(store.video(video_id), store.translate_action)
 
 
 @app.api_route("/api/videos/{video_id}/media", methods=["GET", "HEAD"])
@@ -147,7 +149,7 @@ def retry(video_id: str, request: Request):
     store = request.app.state.store
     store.retry(video_id)
     request.app.state.worker.wake.set()
-    return store.video(video_id)
+    return get_video(video_id, request)
 
 
 app.mount("/web", StaticFiles(directory=ROOT / "web", check_dir=False))

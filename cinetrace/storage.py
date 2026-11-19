@@ -5,6 +5,7 @@ import json
 import sqlite3
 import threading
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
@@ -21,6 +22,8 @@ class Store:
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.upload_lock = threading.Lock()
+        self.translation_lock = threading.Lock()
+        self.translate_action = lru_cache(maxsize=4096)(self._translate_action)
         with self.db() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
@@ -36,6 +39,9 @@ class Store:
                 CREATE TABLE IF NOT EXISTS upload_parts (
                     video_id TEXT NOT NULL, part_index INTEGER NOT NULL, sha256 TEXT NOT NULL,
                     PRIMARY KEY(video_id, part_index)
+                );
+                CREATE TABLE IF NOT EXISTS action_translations (
+                    original TEXT PRIMARY KEY, chinese TEXT NOT NULL
                 );
             """)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(videos)")}
@@ -56,6 +62,19 @@ class Store:
     def list_videos(self):
         with self.db() as db:
             return [dict(r) for r in db.execute(f"SELECT {SUMMARY} FROM videos ORDER BY created_at DESC, rowid DESC")]
+
+    def _translate_action(self, text):
+        from .translation import translate_action
+
+        with self.translation_lock:
+            with self.db() as db:
+                row = db.execute("SELECT chinese FROM action_translations WHERE original=?", (text,)).fetchone()
+            if row:
+                return row["chinese"]
+            chinese = translate_action(text)
+            with self.db() as db:
+                db.execute("INSERT OR REPLACE INTO action_translations VALUES (?,?)", (text, chinese))
+            return chinese
 
     def video(self, video_id):
         with self.db() as db:
