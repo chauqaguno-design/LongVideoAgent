@@ -1,4 +1,4 @@
-# Optional CPU-compatible SmolVLM2 runtime. Install alongside requirements.txt.
+# Local Qwen3-VL and SmolVLM2 runtimes. Install alongside requirements.txt.
 torch==2.7.1
 torchvision==0.22.1
 transformers==4.57.6

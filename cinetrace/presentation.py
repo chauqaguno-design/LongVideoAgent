@@ -28,4 +28,10 @@ def chinese_actions(context, translate=None):
         if changed.intersection(refs):
             scene = {**scene, "summary": scene_summary(by_id[key] for key in refs)}
         scenes.append(scene)
-    return {**context, "evidence": display, "scenes": scenes}
+    tracks = dict(context.get("tracks", {}))
+    visual = tracks.get("visual", {})
+    if "refresh" in visual:
+        pending = visual["refresh"]
+        tracks["visual"] = {"status": "processing", "progress": pending.get("progress", 0),
+                            "message": "正在重新分析画面，完成后更新证据。"}
+    return {**context, "tracks": tracks, "evidence": display, "scenes": scenes}

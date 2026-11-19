@@ -33,9 +33,16 @@ def post_clip(path, duration, base_url, key):
         raise ValueError("请提供非空 MP4，Base64 编码后需小于 10 MB。")
     data = base64.b64encode(path.read_bytes()).decode("ascii")
     prompt = (
-        f"用简体中文描述画面可见的动作，用 0 到 {duration:g} 之间的片内秒数标注起止。"
-        '只输出 JSON 对象，格式为 {"events":[{"start_s":1.0,"end_s":2.5,"action":"动作描述"}]}。'
-        '没有可确认的动作时返回 {"events":[]}，不推断人物台词。'
+        "逐段比较连续画面，找出能看见的动作，每个动作单独记录。"
+        "有人物时，用位置或明显服饰区分动作主体，写清身体哪一部分怎么动、"
+        "与谁或什么物体接触，以及能看到的结果。只写能分辨的细节。"
+        "区分摄影机移动、切镜和人物自身的动作。不要把不同镜头的人当成同一个人。"
+        "静止站立不足以判断人物走过来；遮挡时不要补全动作，不猜姓名、意图或台词。"
+        "无人入镜时也可记录物体本身发生的可见变化。"
+        f"用简体中文，按时间顺序输出，起止用 0 到 {duration:g} 之间的片内秒数估计，"
+        "从首次看到动作变化记到动作结束或离开画面。"
+        '只输出 JSON 对象，格式为 {"events":[{"start_s":1.0,"end_s":2.5,"action":"可见动作"}]}。'
+        '没有可确认的动作时返回 {"events":[]}。'
     )
     content = [
         {"type": "video_url", "video_url": {"url": "data:video/mp4;base64," + data}, "fps": 2},
@@ -55,7 +62,12 @@ def post_clip(path, duration, base_url, key):
 
 
 def source_events(result, duration, start_ms):
-    message = result["choices"][0]["message"]["content"]
+    if type(start_ms) is not int or start_ms < 0 or not math.isfinite(duration) or duration <= 0:
+        raise ValueError("需要有效的原片起始毫秒和片段时长。")
+    choice = result["choices"][0]
+    if choice.get("finish_reason") == "length":
+        raise ValueError("模型输出被截断，无法完整读取动作列表。")
+    message = choice["message"]["content"]
     if not isinstance(message, str) or not message.strip():
         raise ValueError("缺少模型输出内容。")
     text = message.strip()
@@ -75,7 +87,7 @@ def source_events(result, duration, start_ms):
             raise ValueError("缺少动作描述。")
         normalized.append({"start_ms": start_ms + round(begin * 1000),
                            "end_ms": start_ms + round(end * 1000), "action": action.strip()})
-    return normalized
+    return sorted(normalized, key=lambda event: (event["start_ms"], event["end_ms"]))
 
 
 def main():

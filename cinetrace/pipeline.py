@@ -31,24 +31,27 @@ def timeline(duration, evidence):
     for i in range(0, len(chunks), 8):
         group = chunks[i:i + 8]
         ids = list(dict.fromkeys(key for chunk in group for key in chunk["evidence_ids"]))
-        # Choose one source quote per track. Each sentence remains traceable to the film.
-        quotes = {}
+        quotes = []
+        seen = {track: set() for track in TRACKS}
         for key in ids:
             row = by_id[key]
-            quotes.setdefault(row["track"], row)
-        summary = scene_summary(quotes.values())
+            track = row["track"]
+            if len(seen[track]) < (3 if track == "visual" else 1) and row["text"] not in seen[track]:
+                quotes.append(row)
+                seen[track].add(row["text"])
+        summary = scene_summary(quotes)
         scenes.append({
             "id": f"scene-{group[0]['start_ms']}", "title": f"场景 {len(scenes) + 1}",
             "start_ms": group[0]["start_ms"], "end_ms": group[-1]["end_ms"],
             "summary": summary or "此段暂无可引用的证据。", "chunk_ids": [c["id"] for c in group],
-            "evidence_ids": [row["id"] for row in quotes.values()],
+            "evidence_ids": [row["id"] for row in quotes],
         })
     return chunks, scenes
 
 
 def append_rows(evidence, track, rows, duration):
     previous = next((row for row in reversed(evidence) if row["track"] == track), None)
-    for start, end, text, source in rows:
+    for n, (start, end, text, source) in enumerate(rows):
         start, end = max(0, start), min(duration, end)
         if start >= end or not text:
             continue
@@ -56,7 +59,7 @@ def append_rows(evidence, track, rows, duration):
                 and previous["text"] == text and previous["end_ms"] == start):
             previous["end_ms"] = end
             continue
-        previous = {"id": f"{track}-{len(evidence)}", "track": track, "start_ms": start,
+        previous = {"id": f"{track}-{start}ms-{n}", "track": track, "start_ms": start,
                     "end_ms": end, "text": text, "source": source}
         evidence.append(previous)
 
@@ -69,22 +72,28 @@ def build_context(path, work_dir, previous, publish):
     context = {**previous, "status": "processing", "duration_ms": duration}
     evidence = context.setdefault("evidence", [])
     tracks = context.setdefault("tracks", {})
-    for i, (track, (label, extractor)) in enumerate(TRACKS.items()):
-        state = tracks.setdefault(track, {})
+    # Keep the published timeline usable while rebuilding only its visual evidence.
+    refresh = tracks.get("visual", {}).get("refresh")
+    selected = ["visual"] if refresh is not None else list(TRACKS)
+    for i, track in enumerate(selected):
+        label, extractor = TRACKS[track]
+        state = refresh if refresh is not None else tracks.setdefault(track, {})
+        rows_for_track = state["rows"] if refresh is not None else evidence
         if state.get("status") in {"ready", "empty"}:
             continue
         start = state.get("done_ms", 0)
         state.update(status="processing", message=f"正在提取{label}。")
-        context.update(stage=f"提取{label}", progress=round((i + start / duration) * 30))
+        share = 90 / len(selected)
+        context.update(stage=f"提取{label}", progress=round((i + start / duration) * share))
         publish(context)
         try:
             with TemporaryDirectory(dir=work_dir) as temp:
                 for end, rows in extractor(path, Path(temp), info, start):
-                    append_rows(evidence, track, rows, duration)
+                    append_rows(rows_for_track, track, rows, duration)
                     state.update(done_ms=end, progress=round(100 * end / duration))
-                    context["progress"] = round((i + end / duration) * 30)
+                    context["progress"] = round((i + end / duration) * share)
                     publish(context)
-            count = sum(row["track"] == track for row in evidence)
+            count = sum(row["track"] == track for row in rows_for_track)
             state.update(status="ready" if count else "empty", progress=100, done_ms=duration,
                          message=f"{count} 条{label}证据" if count else f"未检出{label}。")
         except InterruptedError:
@@ -93,6 +102,14 @@ def build_context(path, work_dir, previous, publish):
             state.update(status="unavailable", message=str(exc))
         except Exception as exc:
             state.update(status="failed", message=f"{label}提取失败：{exc}")
+        if refresh is not None:
+            del tracks[track]["refresh"]
+            if state["status"] not in {"ready", "empty"}:
+                context.update(status="partial", error=state["message"], progress=100)
+                return context
+            tracks[track] = {k: v for k, v in state.items() if k != "rows"}
+            evidence[:] = [row for row in evidence if row["track"] != track] + rows_for_track
+            context.update(chunks=[], scenes=[], index={"status": "pending"})
         publish(context)
 
     context.update(stage="整理场景与检索块", progress=92)
@@ -106,7 +123,7 @@ def build_context(path, work_dir, previous, publish):
         context["index"] = build_index(path, work_dir, context)
     except Exception as exc:
         context["index"] = {"status": "failed", "message": f"向量索引失败：{exc}"}
-    all_tracks = all(state["status"] in {"ready", "empty"} for state in tracks.values())
+    all_tracks = all(tracks.get(track, {}).get("status") in {"ready", "empty"} for track in TRACKS)
     complete = all_tracks and context["index"].get("status") == "ready"
     context.update(status="ready" if complete else "partial", stage="处理完成", progress=100)
     return context

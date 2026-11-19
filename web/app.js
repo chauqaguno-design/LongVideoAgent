@@ -246,6 +246,7 @@ function renderTracks() {
   $("task-error").hidden = !video?.error;
   $("task-error").textContent = video?.error || "";
   $("retry").hidden = !["partial", "failed"].includes(video?.status);
+  $("refresh-visual").hidden = !["ready", "partial", "failed"].includes(video?.status);
 }
 
 function seekTo(ms) {
@@ -267,6 +268,29 @@ function changeView(view, track = "") {
   state.scene = state.chunk = null;
   state.limit = PAGE_SIZE;
   renderResults();
+}
+
+function frameComparison(videoId, row) {
+  const details = element("details", "action-original");
+  details.append(element("summary", null, "对照原片画面"));
+  details.ontoggle = () => {
+    if (!details.open || details.querySelector(".frame-strip")) return;
+    const strip = element("div", "frame-strip");
+    for (const position of [0.1, 0.5, 0.9]) {
+      const ms = row.start_ms + Math.floor((row.end_ms - row.start_ms) * position);
+      const label = duration(ms, true);
+      const button = element("button", null);
+      const image = element("img", null);
+      image.alt = label + " 的原片画面";
+      image.src = "/api/videos/" + encodeURIComponent(videoId) + "/frame/" + ms + ".jpg";
+      button.title = "从 " + label + " 播放";
+      button.append(image, element("span", null, label));
+      button.onclick = () => seekTo(ms);
+      strip.append(button);
+    }
+    details.append(strip);
+  };
+  return details;
 }
 
 function renderResults() {
@@ -311,7 +335,8 @@ function renderResults() {
   if (!items.length) list.append(element("p", "empty-text", video ? "当前范围内暂无" + VIEWS[view] : "上传视频后，可在此查看场景、检索块和证据"));
   for (const [i, row] of items.slice(0, state.limit).entries()) {
     const title = view === "scenes" ? (row.title || "场景 " + (i + 1)) : view === "chunks" ? "检索块 " + (i + 1) : row.text;
-    const detail = view === "scenes" ? row.summary : view === "chunks" ? (row.evidence_ids || []).length + " 条关联证据" : [TRACKS[row.track], row.source].filter(Boolean).join(" · ");
+    const sourceLabel = row.track === "visual" ? "动作模型描述" : TRACKS[row.track];
+    const detail = view === "scenes" ? row.summary : view === "chunks" ? (row.evidence_ids || []).length + " 条关联证据" : [sourceLabel, row.source].filter(Boolean).join(" · ");
     const button = element("button", "record");
     button.title = view === "evidence" ? "从证据起点播放原片" : "定位原片并展开" + (view === "scenes" ? "检索块" : "证据");
     const text = element("span", "record-text");
@@ -328,6 +353,7 @@ function renderResults() {
       state.track = ""; state.limit = PAGE_SIZE; renderResults();
     };
     list.append(button);
+    if (view === "evidence" && row.track === "visual") list.append(frameComparison(video.id, row));
     if (view === "evidence" && row.original_text) {
       const original = element("details", "action-original");
       original.append(element("summary", null, "查看英文原文"), element("p", null, row.original_text));
@@ -342,17 +368,19 @@ document.querySelectorAll("[data-view]").forEach((button) => button.onclick = ()
 $("file").onchange = () => { if ($("file").files[0]) uploadFile($("file").files[0]); };
 $("pause-upload").onclick = () => state.upload?.abort();
 $("more").onclick = () => { state.limit += PAGE_SIZE; renderResults(); };
-$("retry").onclick = async () => {
+async function queueAnalysis(button, route) {
   if (!state.id) return;
   const id = state.id;
-  $("retry").disabled = true;
+  button.disabled = true;
   try {
-    await api("/api/videos/" + encodeURIComponent(id) + "/retry", { method: "POST" });
+    await api("/api/videos/" + encodeURIComponent(id) + "/" + route, { method: "POST" });
     if (id === state.id) await openVideo(id);
     await refreshLibrary();
-  } catch (error) { notice("重试失败。" + error.message); }
-  finally { $("retry").disabled = false; }
-};
+  } catch (error) { notice("未能安排处理。" + error.message); }
+  finally { button.disabled = false; }
+}
+$("retry").onclick = (e) => queueAnalysis(e.currentTarget, "retry");
+$("refresh-visual").onclick = (e) => queueAnalysis(e.currentTarget, "refresh-visual");
 player.ontimeupdate = () => { $("play-time").textContent = duration(player.currentTime * 1000); };
 const zone = $("drop-zone");
 for (const event of ["dragover", "drop"]) {
@@ -373,8 +401,11 @@ async function start() {
     await refreshLibrary();
     let saved;
     try { saved = localStorage.getItem("cinetrace.video"); } catch { /* Optional preference. */ }
-    const selected = state.videos.find((video) => String(video.id) === saved) || state.videos[0];
+    const params = new URLSearchParams(location.search);
+    const requested = state.videos.find((video) => String(video.id) === params.get("video"));
+    const selected = requested || state.videos.find((video) => String(video.id) === saved) || state.videos[0];
     if (selected) await openVideo(String(selected.id));
+    if (requested && Object.hasOwn(TRACKS, params.get("track"))) changeView("evidence", params.get("track"));
   } catch (error) { notice("无法读取素材库。" + error.message); }
   async function poll() {
     try {

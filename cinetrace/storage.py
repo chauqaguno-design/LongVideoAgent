@@ -187,6 +187,21 @@ class Store:
             db.execute("""UPDATE videos SET status='queued',stage='等待重试',error=NULL,notify_pending=1
                           WHERE id=? AND status IN ('failed','partial')""", (video_id,))
 
+    def refresh_visual(self, video_id):
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status,context FROM videos WHERE id=?", (video_id,)).fetchone()
+            if row is None:
+                raise HTTPException(404, "找不到这份视频")
+            if row["status"] not in {"ready", "partial", "failed"}:
+                raise HTTPException(409, "请等当前任务完成后再重新分析画面")
+            context = json.loads(row["context"])
+            visual = context.setdefault("tracks", {}).setdefault("visual", {})
+            visual["refresh"] = {"rows": []}
+            db.execute("""UPDATE videos SET status='queued',stage='等待重新分析画面',progress=0,
+                          error=NULL,notify_pending=1,context=? WHERE id=?""",
+                       (json.dumps(context, ensure_ascii=False), video_id))
+
     def claim(self):
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")

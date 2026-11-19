@@ -20,18 +20,24 @@ Copy-Item .env.example .env
 | 功能 | 配置 |
 |---|---|
 | 语音 | 默认使用本机 CPU 上的 faster-whisper `turbo`。首次加载会下载权重。可把 `CINETRACE_WHISPER_MODEL` 设为 `base` 或已下载的模型目录。 |
-| 动作 | 配置同一百炼工作空间的 `DASHSCOPE_BASE_URL` 和 `DASHSCOPE_API_KEY`，系统会把移除音轨的短片发给 `qwen3-vl-plus`。需要在本机运行时，可用下方 SmolVLM2 配置。原片始终保存在本机。 |
+| 动作 | 本地 Qwen3-VL-2B-Instruct 比较镜头内的连续画面，用中文描述人物、可见动作和物体交互。SmolVLM2 提供轻量的代表帧描述。配置百炼的 `DASHSCOPE_BASE_URL` 和 `DASHSCOPE_API_KEY` 后，系统优先把静音片段发给 `qwen3-vl-plus`。 |
 | 字幕 | 自动读取内封文本字幕。烧录或位图字幕可通过 `CINETRACE_OCR=1` 启用本地 PP-OCRv5。 |
 
-本地动作模型可以分析无声、无字幕的视频。工作台将英文画面观察离线翻译为简体中文，同时更新场景摘要中的动作描述。在动作证据下点「查看英文原文」即可核对。已上传的素材可直接查看，译文缓存在本机 SQLite 中。动作时间标到片段范围，人物关系和短动作可回看原片核对。
+本地模式先检测硬切，再把长镜头均分为最多 4 秒的小段。每条证据的时间是模型看过的片段范围。在「证据 → 动作」中展开「对照原片画面」，可以查看并点击片段前、中、后部的三张原始画面。已有素材可点「重新分析画面」，复用原片、语音和字幕，更新动作证据、场景和索引。两小时影片至少需要 1800 个这样的窗口，适合先用短片评估速度和质量。
 
 ```powershell
 .\.venv\Scripts\python -m pip install -r requirements-local-vision.txt
+.\.venv\Scripts\hf download Qwen/Qwen3-VL-2B-Instruct --revision 89644892e4d85e24eaac8bacfd4f463576704203 --local-dir data/models/Qwen3-VL-2B-Instruct
+```
+
+在 `.env` 中设置 `CINETRACE_LOCAL_VISION=data/models/Qwen3-VL-2B-Instruct` 并重启。模型权重约 4.3 GB。若选择轻量模型，将该变量指向下方的 SmolVLM2 目录。它从每个小段选择一张代表帧，英文描述由本机翻译并缓存；「查看英文原文」可用于对照。
+
+```powershell
 .\.venv\Scripts\hf download HuggingFaceTB/SmolVLM2-256M-Video-Instruct --exclude 'onnx/*' --local-dir data/models/SmolVLM2-256M-Video-Instruct
 .\.venv\Scripts\hf download Helsinki-NLP/opus-mt-en-zh --revision 408d9bc410a388e1d9aef112a2daba955b945255 --include '*.json' '*.spm' 'pytorch_model.bin' --local-dir data/models/opus-mt-en-zh
 ```
 
-在 `.env` 中设置 `CINETRACE_LOCAL_VISION=data/models/SmolVLM2-256M-Video-Instruct`。要启用烧录字幕识别，安装 `paddlepaddle==3.2.2` 和 `paddleocr==3.3.2`，再设置 `CINETRACE_OCR=1`。PP-OCRv5 的检测和识别权重会在首次使用时下载。完成配置后可在原任务上点击「重试未完成的处理」，复用已完成的轨道。
+要启用烧录字幕识别，安装 `paddlepaddle==3.2.2` 和 `paddleocr==3.3.2`，再设置 `CINETRACE_OCR=1`。PP-OCRv5 的检测和识别权重会在首次使用时下载。完成配置后可在原任务上点击「重试未完成的处理」，复用已完成的轨道。
 
 ## 从上传到回看
 

@@ -1,5 +1,6 @@
 """Read one film as bounded batches of time-stamped observations."""
 
+import json
 import os
 import re
 import shutil
@@ -58,6 +59,20 @@ def windows(start, duration, step):
         yield begin, min(begin + step, duration)
 
 
+def shot_windows(path, start, duration):
+    """Find hard cuts in bounded batches, then divide long shots into short observations."""
+    filters = "scale=160:-2,select='gt(scene,0.27)',metadata=print:key=lavfi.scene_score:file=-"
+    for begin, end in windows(start, duration, 30_000):
+        metadata = ffmpeg("-ss", begin / 1000, "-t", (end - begin) / 1000, "-i", path,
+                          "-map", "0:v:0", "-an", "-vf", filters, "-f", "null", "-")
+        cuts = [begin + round(float(s) * 1000) for s in re.findall(rb"pts_time:([\d.]+)", metadata)]
+        boundaries = [begin, *(t for t in cuts if begin < t < end), end]
+        for left, right in zip(boundaries, boundaries[1:]):
+            count = (right - left + 3999) // 4000
+            for n in range(count):
+                yield left + n * (right - left) // count, left + (n + 1) * (right - left) // count
+
+
 @lru_cache(maxsize=1)
 def whisper(name):
     try:
@@ -83,19 +98,36 @@ def speech_batches(path, temp, info, start):
         yield end, rows
 
 
+def local_describer(directory):
+    with (Path(directory) / "config.json").open(encoding="utf-8") as config:
+        model_type = json.load(config)["model_type"]
+    if model_type == "qwen3_vl":
+        from .qwen_vision import describe
+        return describe, "Qwen3-VL · 镜头内多帧（估计区间）"
+    if model_type == "smolvlm":
+        from .local_vision import describe
+        return describe, "SmolVLM2 · 代表帧观察（片段范围）"
+    raise Unavailable(f"暂不支持此本地视觉模型类型：{model_type}")
+
+
 def visual_batches(path, temp, info, start):
     key, url = os.getenv("DASHSCOPE_API_KEY"), os.getenv("DASHSCOPE_BASE_URL")
     local_model = os.getenv("CINETRACE_LOCAL_VISION")
     cloud = bool(key and url)
     if not cloud and not local_model:
         raise Unavailable("配置本地视觉模型 CINETRACE_LOCAL_VISION 或百炼 API 后可分析画面。")
-    for begin, end in windows(start, info["duration_ms"], 30_000):
+    if not cloud:
+        describe, model_label = local_describer(local_model)
+    duration_ms = info["duration_ms"]
+    periods = windows(start, duration_ms, 30_000) if cloud else shot_windows(path, start, duration_ms)
+    for begin, end in periods:
         duration = (end - begin) / 1000
         clip = temp / "visual.mp4"
-        # Pad a short final window to the API minimum, then discard padded events.
-        length = max(2, duration)
-        ffmpeg("-ss", begin / 1000, "-i", path, "-map", "0:v:0", "-an",
-               "-vf", "fps=4,scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2,tpad=stop_mode=clone:stop_duration=2",
+        # Trim the input before padding so a short shot never borrows frames from the next one.
+        length = max(2 if cloud else 1, duration)
+        fps = 4 if cloud else 6
+        ffmpeg("-ss", begin / 1000, "-t", duration, "-i", path, "-map", "0:v:0", "-an",
+               "-vf", f"fps={fps}:round=up,scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2,tpad=stop_mode=clone:stop_duration=2",
                "-t", length, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", 26, clip)
         if cloud:
             response = post_clip(clip, length, url, key)
@@ -103,8 +135,7 @@ def visual_batches(path, temp, info, start):
             rows = [(o["start_ms"], min(end, o["end_ms"]), o["action"], "百炼 · qwen3-vl-plus")
                     for o in observations if o["start_ms"] < end]
         else:
-            from .local_vision import describe
-            rows = [(begin, end, describe(clip, local_model), "SmolVLM2 · 英文画面观察（窗口范围）")]
+            rows = [(begin, end, describe(clip, local_model), model_label)]
         yield end, rows
 
 

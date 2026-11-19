@@ -8,13 +8,14 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import pipeline
 from .dispatch import kafka_notifications
+from .media import ffmpeg
 from .presentation import chinese_actions
 from .storage import PART_SIZE, Store
 
@@ -144,12 +145,35 @@ def media(video_id: str, request: Request):
     return FileResponse(path, media_type="video/mp4")
 
 
+@app.get("/api/videos/{video_id}/frame/{at_ms}.jpg")
+def evidence_frame(video_id: str, at_ms: int, request: Request):
+    store = request.app.state.store
+    video = store.video(video_id)
+    if not 0 <= at_ms < (video["duration_ms"] or 0):
+        raise HTTPException(422, "取帧时间超出原片范围")
+    # Seek near the requested instant, then keep the frame displayed at that instant.
+    start = max(0, at_ms - 1000)
+    frame = ffmpeg("-ss", start / 1000, "-i", store.media_path(video_id), "-an",
+                   "-vf", f"trim=end={(at_ms - start + 1) / 1000},scale=256:-2,reverse",
+                   "-frames:v", 1, "-c:v", "mjpeg", "-f", "image2pipe", "-")
+    if not frame:
+        raise HTTPException(404, "此处没有可用的视频帧")
+    return Response(frame, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
 @app.post("/api/videos/{video_id}/retry")
 def retry(video_id: str, request: Request):
     store = request.app.state.store
     store.retry(video_id)
     request.app.state.worker.wake.set()
     return get_video(video_id, request)
+
+
+@app.post("/api/videos/{video_id}/refresh-visual", status_code=202)
+def refresh_visual(video_id: str, request: Request):
+    request.app.state.store.refresh_visual(video_id)
+    request.app.state.worker.wake.set()
+    return {"status": "queued"}
 
 
 app.mount("/web", StaticFiles(directory=ROOT / "web", check_dir=False))
