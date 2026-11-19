@@ -1,4 +1,6 @@
 /test-media/
+/data/
+.runtime/
 .venv/
 __pycache__/
 .env

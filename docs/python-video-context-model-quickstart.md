@@ -116,4 +116,6 @@ print(tuple(vectors.shape), '余弦相似度', float(vectors[0] @ vectors[1]))
 
 源文件为 320×240 H.264 画面和 48 kHz 双声道 AAC，无内封字幕。使用 PRD 末尾列出的版本，跳到原片 10:00–10:15。对这段逐秒抽帧目视检查，约 10:09 有一名女子走到两名男子之间，抽查画面未见烧录字幕。它可以作为视觉模型首次试跑的人工对照。[长片与校验值](./python-video-context-v1-prd.md#首轮测试素材)
 
-同段音轨转为 16 kHz 单声道 WAV，用 `faster-whisper` 的英文小模型 `tiny.en` 在 CPU 上做了真实转写。返回 10 个语段，其中原片 609000–610000 毫秒的识别文本为 “Wait a minute.”。想复现这次低开销试跑，可把上面示例的模型名由 `turbo` 换为 `tiny.en` 并指定 `language='en'`。此结果覆盖取音、转写和时间换算；百炼动作、正式转写模型 `turbo`、OCR 和向量排名仍待各自实测。
+同段音轨转为 16 kHz 单声道 WAV，用 `faster-whisper` 的英文小模型 `tiny.en` 在 CPU 上做了真实转写。返回 10 个语段，其中原片 609000–610000 毫秒的识别文本为 “Wait a minute.”。想复现这次低开销试跑，可把上面示例的模型名由 `turbo` 换为 `tiny.en` 并指定 `language='en'`。
+
+本地工作台还可使用 SmolVLM2 离线处理画面。首轮样片已实际运行本地视觉、PP-OCRv5 和 Qwen 向量索引。百炼示例需要自己的工作空间和 Key。[工作台启动与模型配置](../README.md)

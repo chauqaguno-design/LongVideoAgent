@@ -1,0 +1,6 @@
+# Optional CPU-compatible SmolVLM2 runtime. Install alongside requirements.txt.
+torch==2.7.1
+torchvision==0.22.1
+transformers==4.57.6
+num2words==0.5.14
+pillow
