@@ -22,7 +22,7 @@ $python = (Resolve-Path .venv/Scripts/python.exe).Path
 $startSec = 600
 $env:CLIP_START_MS = [string]($startSec * 1000)
 ffprobe -v error -show_entries 'stream=index,codec_type,codec_name:stream_tags=language:format=duration' -of json "$movie"
-ffmpeg -v error -ss $startSec -i "$movie" -t 15 -map 0:v:0 -an -vf 'scale=640:-2' -c:v libx264 -pix_fmt yuv420p -crf 25 visual.mp4
+ffmpeg -v error -ss $startSec -i "$movie" -t 15 -map 0:v:0 -an -vf 'fps=30,scale=640:-2' -c:v libx264 -pix_fmt yuv420p -crf 25 visual.mp4
 if ($LASTEXITCODE -ne 0) { throw '视频裁切失败' }
 $audioStream = ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$movie"
 if ($audioStream -ne $null) {
@@ -47,7 +47,7 @@ if ($audioStream -ne $null) {
 
 ## 3. 转写语音，读取字幕
 
-**语音**　若已生成 `speech.wav`，运行 `& $python -m pip install faster-whisper`。将下面代码保存为 `speech.py`，运行 `& $python speech.py`。`turbo` 首次需要下载本地权重。逐段迭代才实际执行转写；静音测试可能返回零条。[faster-whisper 使用说明](https://github.com/SYSTRAN/faster-whisper#usage)
+**语音**　若已生成 `speech.wav`，运行 `& $python -m pip install 'faster-whisper==1.2.1' 'av==16.0.1'`。这是本次 Windows 试通的音频解码依赖组合。将下面代码保存为 `speech.py`，运行 `& $python speech.py`。`turbo` 首次需要下载本地权重。逐段迭代才实际执行转写；静音测试可能返回零条。[faster-whisper 使用说明](https://github.com/SYSTRAN/faster-whisper#usage)
 
 ```python
 import os
@@ -111,3 +111,9 @@ print(tuple(vectors.shape), '余弦相似度', float(vectors[0] @ vectors[1]))
 ```
 
 要验证检索质量，取一段有该动作和一段没有的画面，用相同查询比较排名。正式入库时保留 `video_id`、块 ID、原片起止、向量来源和模型版本，再将视觉、台词、字幕和动作描述的向量分别写入 Qdrant。一次测试记录片段时长、各步骤用时、云端返回的用量、人工确认的证据区间；这些数据可用于后续长片的成本和定位质量评估。
+
+## 用《Meet John Doe》核对结果
+
+源文件为 320×240 H.264 画面和 48 kHz 双声道 AAC，无内封字幕。使用 PRD 末尾列出的版本，跳到原片 10:00–10:15。对这段逐秒抽帧目视检查，约 10:09 有一名女子走到两名男子之间，抽查画面未见烧录字幕。它可以作为视觉模型首次试跑的人工对照。[长片与校验值](./python-video-context-v1-prd.md#首轮测试素材)
+
+同段音轨转为 16 kHz 单声道 WAV，用 `faster-whisper` 的英文小模型 `tiny.en` 在 CPU 上做了真实转写。返回 10 个语段，其中原片 609000–610000 毫秒的识别文本为 “Wait a minute.”。想复现这次低开销试跑，可把上面示例的模型名由 `turbo` 换为 `tiny.en` 并指定 `language='en'`。此结果覆盖取音、转写和时间换算；百炼动作、正式转写模型 `turbo`、OCR 和向量排名仍待各自实测。
