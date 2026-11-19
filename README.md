@@ -2,14 +2,48 @@
 
 在浏览器中上传一部 MP4，查看台词、字幕和画面动作，点击任何一条证据即可跳回原片。Python 后端同时提供网页和 API，前端使用原生 HTML、CSS、JavaScript。
 
-## 本机启动
+## 用自然语言在一部电影里找片段
+
+电影检索入口是 `python -m cinetrace.film`，可以直接处理本地 MP4，生成中文概述、事件时间线和可跳转的 HTML。这个入口只依赖 Python 库和模型 API。
+
+| 环节 | 第一版选型 | 作用 |
+|---|---|---|
+| 画面 | 百炼 `qwen3-vl-plus`，通过 OpenAI Python SDK 调用 | 每 30 秒建一个窗口，每 5 秒取一帧，记录环境、人物、物件、动作和互动。查询时以 4 fps 回看候选片段。 |
+| 影片资料和文本 | DeepSeek `deepseek-flash`，使用同一 SDK | 根据片名、台词等线索查找带引用的片目资料，合并相邻事件、概括全片并扩展查询词。 |
+| 媒体和台词 | PyAV、FFmpeg、faster-whisper | 优先使用指定的 SRT 或内封文本字幕，再复用原片已有的转写或在本机转写。无音轨也能建画面索引。 |
+| 存储和检索 | SQLite、Python 词项匹配 | 保存原片时间、观察和处理进度。按人物别名、物件、动作与台词找到候选；稀有词和整段短语的匹配权重更高。 |
+| 操作与回看 | Python 命令行、原生 HTML 和 JavaScript | 在终端建立或查询索引，打开 HTML 点击时间即可播放原片对应区间。 |
+
+在仓库根目录使用 Python 3.11 或 3.12。首次安装只需电影入口的依赖。
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-film.txt
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+打开根目录的 `.env`，填写百炼的 `DASHSCOPE_API_KEY`、同地域工作空间的 OpenAI 兼容地址 `DASHSCOPE_BASE_URL`，以及 `DEEPSEEK_API_KEY`。两个服务各自使用自己的 Key。`plan` 只探测片长和窗口数，可以先运行。[百炼视觉接口](https://help.aliyun.com/zh/model-studio/vision) · [DeepSeek 联网工具](https://api-docs.deepseek.com/zh-cn/guides/web_tools/)
+
+```powershell
+$filmPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'CineTrace-15s.mp4'
+.\.venv\Scripts\python -m cinetrace.film plan "$filmPath"
+.\.venv\Scripts\python -m cinetrace.film index "$filmPath" --no-web --html data/films/sample.html
+.\.venv\Scripts\python -m cinetrace.film find "$filmPath" "画面里有人在交谈的片段在哪里？" --budget 3 --html data/films/find.html
+Start-Process data/films/find.html
+```
+
+要处理整部电影，将 `$filmPath` 换成原片路径。已知片名时，可将示例中的 `--no-web` 换成 `--title "Meet John Doe (1941)"`，让 DeepSeek 核对公开资料。已有时间对齐的字幕可加 `--srt .\movie.srt`。公开资料能提供人名和别名；模型使用片段内身份线索判断谁在场，证据不足时保留衣着、位置等描述。
+
+每部电影的索引存在 `data/films/`。重复运行同一条 `index` 命令会复用已完成的窗口。运行 `timeline "$filmPath" --html data/films/sample.html` 子命令可离线重建报告。整两小时对应 240 个视觉观察请求，另有资料查询与文本整理调用；每次提问的 `--budget` 只限制候选视频复核次数。返回的区间覆盖模型回看的原片，5 秒采样之间的短动作可能在初次检索时漏掉。
+
+## 启动本地上传工作台
 
 在仓库根目录打开 PowerShell，使用 Python 3.11 或 3.12。
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
-Copy-Item .env.example .env
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 .\.venv\Scripts\python -m cinetrace
 ```
 

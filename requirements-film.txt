@@ -1,0 +1,6 @@
+# Command-line film indexing and search
+openai>=2.0,<3
+python-dotenv>=1,<2
+av==16.0.1
+faster-whisper==1.2.1
+imageio-ffmpeg>=0.6,<1
