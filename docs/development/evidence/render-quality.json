@@ -1,0 +1,125 @@
+{
+  "revision_id": "4df5f51a-6978-4c31-9c75-8769af225d92",
+  "cases": {
+    "control": {
+      "file": "renders/afc59a78-7979-410c-b834-0bc03c193f33/1/video.mp4",
+      "structure": {
+        "timeline_revision_id": "4df5f51a-6978-4c31-9c75-8769af225d92",
+        "soft_cue_count": 1,
+        "output_sha256": "43c47d95fbb3cc25696752d232654bc1356535ad3edc88e9a1e446902bb88964",
+        "status": "PASSED"
+      },
+      "semantic": {
+        "support": "SUPPORTED",
+        "reason": "观察相邻帧中的颜色变化",
+        "frame_indices": [
+          0,
+          2
+        ],
+        "sequence_id": "94b82bc5-c4ab-5802-8681-be24a8f96ff6",
+        "model_version": "fixture",
+        "adapter_fingerprint": "fixture",
+        "timeline_revision_id": "4df5f51a-6978-4c31-9c75-8769af225d92",
+        "output_artifact_id": "d347d55d-cde6-449e-b06e-e6dd287cc000",
+        "output_sha256": "43c47d95fbb3cc25696752d232654bc1356535ad3edc88e9a1e446902bb88964"
+      },
+      "actual_us": [
+        250000,
+        1000000,
+        1583333
+      ]
+    },
+    "wrong-event": {
+      "file": "renders/qa-fixtures/wrong-event.mp4",
+      "structure": {
+        "timeline_revision_id": "4df5f51a-6978-4c31-9c75-8769af225d92",
+        "soft_cue_count": 1,
+        "output_sha256": "0c0863877cd3b6a42fe915912405f37ce5f54b0ef7618e0be13d50840df83cf0",
+        "status": "PASSED"
+      },
+      "semantic": {
+        "support": "CONFLICTING",
+        "reason": "观察相邻帧中的颜色变化",
+        "frame_indices": [
+          0,
+          2
+        ],
+        "sequence_id": "0020fc63-4f8a-5a31-91a1-fa2d7e66b336",
+        "model_version": "fixture",
+        "adapter_fingerprint": "fixture",
+        "timeline_revision_id": "4df5f51a-6978-4c31-9c75-8769af225d92",
+        "output_artifact_id": "37bdd73b-efce-41e8-9bff-009d62a61a5e",
+        "output_sha256": "0c0863877cd3b6a42fe915912405f37ce5f54b0ef7618e0be13d50840df83cf0"
+      },
+      "actual_us": [
+        250000,
+        1000000,
+        1583333
+      ]
+    },
+    "shifted-subtitle": {
+      "file": "renders/qa-fixtures/shifted-subtitle.mp4",
+      "structure": {
+        "timeline_revision_id": "4df5f51a-6978-4c31-9c75-8769af225d92",
+        "soft_cue_count": 1,
+        "output_sha256": "22d2e01e5e17c3ffa8fb392d67acbb92a381a175cf259c7b164c115858844419",
+        "status": "FAILED",
+        "issue": "Output subtitle times differ from the compiled cues"
+      },
+      "semantic": {
+        "support": "SUPPORTED",
+        "reason": "观察相邻帧中的颜色变化",
+        "frame_indices": [
+          0,
+          2
+        ],
+        "sequence_id": "bd634315-cb17-5217-86ff-e567ee82db3b",
+        "model_version": "fixture",
+        "adapter_fingerprint": "fixture",
+        "timeline_revision_id": "4df5f51a-6978-4c31-9c75-8769af225d92",
+        "output_artifact_id": "d77e5a2b-2aee-4756-94ee-4f8669946313",
+        "output_sha256": "22d2e01e5e17c3ffa8fb392d67acbb92a381a175cf259c7b164c115858844419"
+      },
+      "actual_us": [
+        250000,
+        1000000,
+        1583333
+      ]
+    },
+    "missing-audio": {
+      "file": "renders/qa-fixtures/missing-audio.mp4",
+      "structure": {
+        "timeline_revision_id": "4df5f51a-6978-4c31-9c75-8769af225d92",
+        "soft_cue_count": 1,
+        "output_sha256": "461ba41e25afedd0cf54974d744797e959c9dc648c4d48cc209fdf121b14efa3",
+        "status": "FAILED",
+        "issue": "Output is missing a required video or audio stream"
+      },
+      "semantic": {
+        "support": "SUPPORTED",
+        "reason": "观察相邻帧中的颜色变化",
+        "frame_indices": [
+          0,
+          2
+        ],
+        "sequence_id": "44b309b4-67d0-5623-9507-1f0d73dba229",
+        "model_version": "fixture",
+        "adapter_fingerprint": "fixture",
+        "timeline_revision_id": "4df5f51a-6978-4c31-9c75-8769af225d92",
+        "output_artifact_id": "119941a5-cbcb-4a9d-8bb4-7098af42fdc3",
+        "output_sha256": "461ba41e25afedd0cf54974d744797e959c9dc648c4d48cc209fdf121b14efa3"
+      },
+      "actual_us": [
+        250000,
+        1000000,
+        1583333
+      ]
+    }
+  },
+  "external_calls": 0,
+  "rejected": [
+    "OUTPUT_REVISION_CHANGED",
+    "OUTPUT_DIGEST_CHANGED"
+  ],
+  "verifier": "controlled first-red/last-blue judgment on decoded output frames"
+}

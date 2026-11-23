@@ -1,0 +1,46 @@
+{
+  "run_id": "00000000-0000-4000-8000-000000000091",
+  "workspace_id": "00000000-0000-4000-8000-000000000002",
+  "project_id": "00000000-0000-4000-8000-000000000001",
+  "status": "AWAITING_INPUT",
+  "phase": "BUDGET_CHECK",
+  "state_version": 2,
+  "pending_job_ids": [],
+  "result_artifact_id": null,
+  "evidence_ids": [],
+  "error": null,
+  "budget_usage": {
+    "limits": {
+      "max_model_calls": 12,
+      "max_tool_calls": 24,
+      "max_images": 96,
+      "max_cost_microunits": 1000000,
+      "currency": "USD",
+      "deadline_seconds": 300
+    },
+    "currency": "USD",
+    "pricing_status": "MISSING",
+    "price_version": null,
+    "committed_microunits": null,
+    "reserved_microunits": null,
+    "uncertain_microunits": null,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_hit_tokens": null,
+    "images": 0,
+    "model_calls": 0,
+    "tool_calls": 0
+  },
+  "awaiting_input": {
+    "kind": "BUDGET",
+    "question": "需要配置计价版本才能在货币硬预算内继续付费模型调用。",
+    "options": [
+      "完成配置后继续"
+    ],
+    "context_artifact_ids": []
+  },
+  "superseded_by_run_id": null,
+  "last_event_id": "00000000-0000-4000-8000-000000000090",
+  "last_event_sequence": 2,
+  "cancel_requested_at": null
+}

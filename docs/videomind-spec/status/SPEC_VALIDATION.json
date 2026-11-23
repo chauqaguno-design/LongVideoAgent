@@ -1,0 +1,17 @@
+{
+  "spec_validation": "PASS",
+  "application_validation": "NOT_RUN",
+  "counts": {
+    "markdown_files": 39,
+    "requirements": 42,
+    "tasks": 110,
+    "acceptance_cases": 56,
+    "feature_packages": 8,
+    "domain_schemas": 59,
+    "api_operations": 41,
+    "agent_tools": 14,
+    "contract_examples": 18
+  },
+  "errors": [],
+  "scope": "Static specification, refs, DAG and fixture checks only. No VideoMind runtime, API provider, retrieval quality or rendered media has been certified."
+}

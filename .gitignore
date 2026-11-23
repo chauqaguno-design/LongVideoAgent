@@ -1,6 +1,75 @@
-/test-media/
-/data/
-.runtime/
-.venv/
+# Python/build/test output
 __pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+*.coverage
+*.log
+
+# Local credentials and runtime state
 .env
+.env.*
+!.env.example
+work/
+runtime/
+tmp/
+*.sqlite3
+*.db
+**/node_modules/
+client/dist/
+client/.vite/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Generated media, model weights, and provisioned binaries are not source
+# files. Keep them locally for evidence runs, but do not commit them.
+tools/asr/models/
+tools/asr/downloads/
+tools/asr/python-packages/
+tools/asr/espeak/
+tools/asr/espeak-ng.msi
+tools/ffmpeg/
+tools/tesseract/
+tools/diagnostics/
+tesseract.exe
+*.pt
+*.pth
+*.safetensors
+
+# Real-media evaluation inputs and derived audio/subtitles belong in work/.
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.webm
+*.wav
+*.mp3
+*.m4a
+*.flac
+!tests/spec_005/fixtures/ticket.flac
+*.srt
+*.vtt
+
+# Private agentic-RAG experiments: publish synthetic fixtures and the guide,
+# not raw prompts, cached source excerpts, machine-local snapshots or reports.
+/docs/agentic-rag/*validation*/
+/docs/agentic-rag/R*_*.md
+/docs/agentic-rag/GITHUB_FINALIZATION.md
+/datasets/agentic-rag/retrieval-need-r1-v1.json
+/datasets/agentic-rag/retrieval-need-r1-v1.sha256
+/datasets/v1-wangdao-pilot/

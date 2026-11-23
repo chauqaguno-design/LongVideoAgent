@@ -1,0 +1,93 @@
+[
+  {
+    "file": "examples/search-text.json",
+    "schema": "schemas/domain.schema.json#/$defs/SearchRequest",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/search-image.json",
+    "schema": "schemas/domain.schema.json#/$defs/SearchRequest",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/timeline-patch.json",
+    "schema": "schemas/domain.schema.json#/$defs/TimelinePatch",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/timeline-revision.json",
+    "schema": "schemas/domain.schema.json#/$defs/TimelineRevision",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/frame-artifact.json",
+    "schema": "schemas/domain.schema.json#/$defs/FrameArtifact",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/frame-nonzero-origin.json",
+    "schema": "schemas/domain.schema.json#/$defs/FrameArtifact",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/coverage-partial.json",
+    "schema": "schemas/domain.schema.json#/$defs/CoverageRecord",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/workflow-create.json",
+    "schema": "schemas/domain.schema.json#/$defs/WorkflowCreate",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/render-create.json",
+    "schema": "schemas/domain.schema.json#/$defs/RenderCreate",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/evidence.json",
+    "schema": "schemas/domain.schema.json#/$defs/Evidence",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/search-candidates-partial.json",
+    "schema": "schemas/domain.schema.json#/$defs/SearchResult",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/answer-within-protocol.json",
+    "schema": "schemas/domain.schema.json#/$defs/AnswerResult",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/workflow-awaiting-input.json",
+    "schema": "schemas/domain.schema.json#/$defs/WorkflowRun",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/render-succeeded.json",
+    "schema": "schemas/domain.schema.json#/$defs/RenderJob",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/compiled-timeline.json",
+    "schema": "schemas/domain.schema.json#/$defs/CompiledTimeline",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/job-partial.json",
+    "schema": "schemas/domain.schema.json#/$defs/JobView",
+    "expected": "valid"
+  },
+  {
+    "file": "examples/invalid-revision.json",
+    "schema": "schemas/domain.schema.json#/$defs/TimelinePatch",
+    "expected": "invalid"
+  },
+  {
+    "file": "examples/invalid-time-range.json",
+    "schema": "schemas/domain.schema.json#/$defs/TimelineClip",
+    "expected": "business_invalid",
+    "reason": "end must exceed start"
+  }
+]

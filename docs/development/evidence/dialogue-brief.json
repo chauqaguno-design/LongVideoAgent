@@ -1,0 +1,123 @@
+{
+  "acceptance": "AT-025",
+  "fixture": "Generated FFmpeg video + English TTS + embedded subtitle truth",
+  "tests": "tests/spec_005/test_dialogue_brief.py",
+  "brief": {
+    "brief_id": "4406332f-c924-594c-a1cc-ee52e9166318",
+    "project_id": "fc6f4db8-576e-47b7-8cef-a66a2aec4432",
+    "goal": "总时长2秒，保留讲话，包含字幕「Ticket」，排除字幕「spoiler」，并导出",
+    "source_media_revision_ids": [
+      "08b23dc4-2944-4ecf-8cd4-bc95e254c439"
+    ],
+    "selection_mode": "SEMANTIC",
+    "duration_target_us": 2000000,
+    "duration_tolerance_us": 0,
+    "order_policy": "USER_ORDER",
+    "audio_policy": "KEEP_SOURCE",
+    "must_include": [
+      "Ticket"
+    ],
+    "must_exclude": [
+      "spoiler"
+    ],
+    "output_profile": {
+      "width": 1280,
+      "height": 720,
+      "fps_num": 25,
+      "fps_den": 1,
+      "audio_sample_rate": 48000
+    }
+  },
+  "clips": [
+    {
+      "media_revision_id": "08b23dc4-2944-4ecf-8cd4-bc95e254c439",
+      "source_start_us": 2000000,
+      "source_end_us": 3000000,
+      "evidence_ids": [
+        "f2047cb5-d45a-519a-b75c-f72c513cc015"
+      ],
+      "audio_policy": "keep",
+      "clip_id": "6caa52e0-db85-45c7-a8c9-de62f2a976aa"
+    },
+    {
+      "media_revision_id": "08b23dc4-2944-4ecf-8cd4-bc95e254c439",
+      "source_start_us": 3000000,
+      "source_end_us": 4000000,
+      "evidence_ids": [
+        "f4f16565-d9a5-5bb8-a6c5-3a9248219ec1"
+      ],
+      "audio_policy": "keep",
+      "clip_id": "f0363a46-057d-4f7b-88a2-d40ce9a3390b"
+    }
+  ],
+  "total_duration_us": 2000000,
+  "audio_envelope_similarity": [
+    0.9999931203940973,
+    0.9999931581418775
+  ],
+  "export_bytes": 740951,
+  "export_sha256": "3102a0bcb152a5a5bd7137f3ee26e35e4dc8b8d2454c686b069b7e142e9b8c12",
+  "cases": [
+    {
+      "status": "SUCCEEDED",
+      "question": "总时长2秒，保留讲话，包含字幕「Ticket」，排除字幕「spoiler」，并导出",
+      "awaiting_input": null,
+      "model_calls": 0
+    },
+    {
+      "status": "AWAITING_INPUT",
+      "question": "总时长4秒，保留讲话，包含字幕「Ticket」，排除字幕「spoiler」，并导出",
+      "awaiting_input": {
+        "kind": "CONSTRAINT_CONFLICT",
+        "question": "保留整段原文时，候选无法拼出目标 4 秒，请调整时长或条件。",
+        "options": [],
+        "context_artifact_ids": []
+      },
+      "model_calls": 0
+    },
+    {
+      "status": "AWAITING_INPUT",
+      "question": "总时长2秒，保留讲话，包含字幕「Ticket」，排除字幕「Ticket」，并导出",
+      "awaiting_input": {
+        "kind": "CONSTRAINT_CONFLICT",
+        "question": "必须保留的原文包含了要求排除的字幕原文，请调整其中一项。",
+        "options": [],
+        "context_artifact_ids": []
+      },
+      "model_calls": 0
+    },
+    {
+      "status": "AWAITING_INPUT",
+      "question": "总时长2秒，保留讲话，包含字幕「spoiler」，排除字幕「Ticket」，并导出",
+      "awaiting_input": {
+        "kind": "CONSTRAINT_CONFLICT",
+        "question": "匹配的片段均与要求排除的字幕重叠，请修改包含或排除条件。",
+        "options": [],
+        "context_artifact_ids": []
+      },
+      "model_calls": 0
+    },
+    {
+      "status": "AWAITING_INPUT",
+      "question": "总时长2秒，保留讲话，包含字幕「Ticket」，排除字幕「spoiler」，并导出",
+      "awaiting_input": {
+        "kind": "CONSTRAINT_CONFLICT",
+        "question": "匹配的素材没有原音轨，无法保留讲话。请选择带声音的素材或调整音轨要求。",
+        "options": [],
+        "context_artifact_ids": []
+      },
+      "model_calls": 0
+    },
+    {
+      "status": "AWAITING_INPUT",
+      "question": "总时长2秒，保留讲话，包含台词「Ticket」，排除台词「spoiler」，并导出",
+      "awaiting_input": {
+        "kind": "CLARIFICATION",
+        "question": "可以逐条核对内嵌字幕。若要排除声音或画面，请指定已核实的区间，或明确改为排除字幕原文。",
+        "options": [],
+        "context_artifact_ids": []
+      },
+      "model_calls": 0
+    }
+  ]
+}

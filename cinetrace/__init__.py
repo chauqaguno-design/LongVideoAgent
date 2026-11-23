@@ -1,1 +1,0 @@
-"""CineTrace long-video workspace."""

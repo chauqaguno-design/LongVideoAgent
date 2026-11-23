@@ -1,0 +1,2115 @@
+{
+  "scope": "development sample",
+  "source_sha256": "52bf9b5d3bd71f7914dcab6ea99b4a68a9b13543334736ac098ad64d25d3bf79",
+  "model": {
+    "version": "Qwen3-VL-Embedding-d09957ac4463ea711d2f7721f31d3bb83aa6ae3df4c6e646cb576bb8234788c7",
+    "dimensions": 2048
+  },
+  "tie_epsilon": 1e-06,
+  "scene_threshold": 0.25,
+  "shot_start_frames": [
+    0,
+    103,
+    219,
+    388
+  ],
+  "frame_offsets": [
+    -8,
+    -1,
+    0,
+    1,
+    8
+  ],
+  "gallery_size": 20,
+  "inference_seconds": 22.08,
+  "queries": [
+    {
+      "transform": "center_crop_75",
+      "target_frame": 51,
+      "actual_us": 1700000,
+      "target_shot": 1,
+      "exact_rank": 2,
+      "tie_ranks": [
+        2,
+        2
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8936040786127625
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.864968405314202
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8556741293935972
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8397024531118192
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8395539240586468
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5840463716135199
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5832405424660917
+        },
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5829648781835534
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5819375082366655
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5785086323227764
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.513982156250534
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5131769604800595
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5027488916511035
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.48625979980804485
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.48237326040804435
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.47882913838302615
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4652024302535032
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.46459976780026324
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.46346213274060716
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.45403689991612456
+        }
+      ]
+    },
+    {
+      "transform": "jpeg_q25",
+      "target_frame": 51,
+      "actual_us": 1700000,
+      "target_shot": 1,
+      "exact_rank": 2,
+      "tie_ranks": [
+        2,
+        2
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9081288625862582
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.9026758383063582
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8968688864266361
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8648219286624926
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8487238680429517
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.629217739922897
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6279342345722545
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6264207104119985
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6258583145137592
+        },
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6197776405924603
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5325855686517128
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5320646037839845
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5287604068802767
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5036390827740168
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5017831854229993
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4752691240132326
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4696961903242259
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4689994225675956
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4687892010840494
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.45746694521806536
+        }
+      ]
+    },
+    {
+      "transform": "crop_resize_jpeg_q25",
+      "target_frame": 51,
+      "actual_us": 1700000,
+      "target_shot": 1,
+      "exact_rank": 2,
+      "tie_ranks": [
+        2,
+        2
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7735686031702985
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.7676373914218705
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7432711599286408
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7156386267093554
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7114893235294
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5213860256489593
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5202244346284826
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5193259627733551
+        },
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5193074385594306
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.518982311390823
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4907126022540783
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.483399418533091
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.47915457507665304
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.47704481402710897
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.47242466150267376
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.41969589032659715
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4095229113482246
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4051909020500877
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4042292148279387
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4027959700535652
+        }
+      ]
+    },
+    {
+      "transform": "center_crop_75",
+      "target_frame": 160,
+      "actual_us": 5333333,
+      "target_shot": 2,
+      "exact_rank": 2,
+      "tie_ranks": [
+        2,
+        2
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9398420861944988
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.937812189499764
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9365137782137672
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9317834427725156
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9286348733795405
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6985309652685375
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6975341666262973
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6852719568169516
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6841279610999653
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6740517693554148
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6298061284477494
+        },
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6238945411463126
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6200246874482731
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6122836110227655
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5964814506899196
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5501649886295176
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5205505823745542
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5042762700850637
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.49706668923330316
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.48418707903480074
+        }
+      ]
+    },
+    {
+      "transform": "jpeg_q25",
+      "target_frame": 160,
+      "actual_us": 5333333,
+      "target_shot": 2,
+      "exact_rank": 4,
+      "tie_ranks": [
+        4,
+        4
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9726344827797712
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9719433915023766
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.971118422788893
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.9681502144579249
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9615824083132724
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7101752326770666
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7021608508856225
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6931253833285832
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6923393763344786
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6840155279909417
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6378552677570931
+        },
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6356483105127287
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6258343067007021
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6236684269334757
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5990240403319287
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5610584325798982
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5254265208477523
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.51938758355235
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5015104849989933
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.48049437540813117
+        }
+      ]
+    },
+    {
+      "transform": "crop_resize_jpeg_q25",
+      "target_frame": 160,
+      "actual_us": 5333333,
+      "target_shot": 2,
+      "exact_rank": 4,
+      "tie_ranks": [
+        4,
+        4
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.814190266487276
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7984656433605383
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.797410602238238
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.7955012206693596
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7858304046449672
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6997026976779117
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6939961210556125
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6897518694510861
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6880720637767188
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6838634992966248
+        },
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6534967276767741
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6514675360401313
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6501368509314058
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6471766481169384
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6275789227708253
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5707556545757716
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5589035118866956
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.547709196832884
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5426443750673502
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5410225558341016
+        }
+      ]
+    },
+    {
+      "transform": "center_crop_75",
+      "target_frame": 303,
+      "actual_us": 10100000,
+      "target_shot": 3,
+      "exact_rank": 4,
+      "tie_ranks": [
+        4,
+        4
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7677917871509573
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7617094364099698
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7558978596157363
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.7542959262326902
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7392596931966633
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7199517341734581
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7132326132277755
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7125913654313876
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7119414522066038
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7118419090144543
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6600493180867779
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6569304309767098
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6545476369147014
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6497391388802196
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6463862561499251
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6168547450013198
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6123428673923894
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6117991867348426
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6056640869095692
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5614679778055108
+        }
+      ]
+    },
+    {
+      "transform": "jpeg_q25",
+      "target_frame": 303,
+      "actual_us": 10100000,
+      "target_shot": 3,
+      "exact_rank": 2,
+      "tie_ranks": [
+        2,
+        2
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.964117190032191
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.9587338638412548
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9539846433056706
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9538195458602985
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.950739823977718
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7648978174975894
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7586501890688434
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7582522819909039
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7543106806439209
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7541818715072516
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6810395269463225
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6578733487702516
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6416598054629138
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6353347209117315
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6198439598226627
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6162783857178378
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6117908265936705
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6072293971105803
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6027532120150823
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.602179875673684
+        }
+      ]
+    },
+    {
+      "transform": "crop_resize_jpeg_q25",
+      "target_frame": 303,
+      "actual_us": 10100000,
+      "target_shot": 3,
+      "exact_rank": 3,
+      "tie_ranks": [
+        3,
+        3
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.6734095255309008
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.6636356262161611
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.6633489978344617
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.6574797844281546
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.6544372570057402
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6331940907415098
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6206207287101634
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6195174267439204
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6167487245826745
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6149776367454516
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6047398716282442
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5987265997190484
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5980694754163365
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5965087229524763
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5919276486844778
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.48873940226991863
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.4773445788538956
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.47427381900893734
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.47216357494222855
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.46626059694526506
+        }
+      ]
+    },
+    {
+      "transform": "center_crop_75",
+      "target_frame": 418,
+      "actual_us": 13933333,
+      "target_shot": 4,
+      "exact_rank": 1,
+      "tie_ranks": [
+        1,
+        1
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.9093086262532774
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.907869824422409
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8980241814864194
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8901597899321035
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.8884602561131613
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7715063670573706
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7654719498494714
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7649109165335845
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7598509045339439
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7591483564316442
+        },
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7496707349510293
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7412463170903352
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7409735057042606
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7387089498111316
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7367356372483609
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5866006186110818
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5766696449574827
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5525910829817771
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5495850290860902
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5469479505024445
+        }
+      ]
+    },
+    {
+      "transform": "jpeg_q25",
+      "target_frame": 418,
+      "actual_us": 13933333,
+      "target_shot": 4,
+      "exact_rank": 1,
+      "tie_ranks": [
+        1,
+        1
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.9618301896485855
+        },
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9616187325205896
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9604212879644525
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9596939613466632
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.9595090406760346
+        },
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.8067572832657062
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.8036937919729417
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7950535847696467
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7921957211759667
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7845210429749536
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7161779887543106
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7143356054034907
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7134843394463299
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7095333422348926
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.7054582789950044
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.660570612955498
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6266624462903772
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6151655660363227
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5922404367748599
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5852134573365197
+        }
+      ]
+    },
+    {
+      "transform": "crop_resize_jpeg_q25",
+      "target_frame": 418,
+      "actual_us": 13933333,
+      "target_shot": 4,
+      "exact_rank": 3,
+      "tie_ranks": [
+        3,
+        3
+      ],
+      "same_shot_first": true,
+      "ranks": [
+        {
+          "frame": 417,
+          "actual_us": 13900000,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7652120758030068
+        },
+        {
+          "frame": 426,
+          "actual_us": 14200000,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7651039347057289
+        },
+        {
+          "frame": 418,
+          "actual_us": 13933333,
+          "shot": 4,
+          "relation": "original",
+          "same_pixels": true,
+          "cosine": 0.7621908638237429
+        },
+        {
+          "frame": 410,
+          "actual_us": 13666667,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7585053111139844
+        },
+        {
+          "frame": 419,
+          "actual_us": 13966667,
+          "shot": 4,
+          "relation": "same_shot",
+          "same_pixels": false,
+          "cosine": 0.7512867293920257
+        },
+        {
+          "frame": 302,
+          "actual_us": 10066667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.679932159294835
+        },
+        {
+          "frame": 303,
+          "actual_us": 10100000,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6790283152321352
+        },
+        {
+          "frame": 311,
+          "actual_us": 10366667,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.67901529896359
+        },
+        {
+          "frame": 295,
+          "actual_us": 9833333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6725270697218557
+        },
+        {
+          "frame": 304,
+          "actual_us": 10133333,
+          "shot": 3,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6695940565624772
+        },
+        {
+          "frame": 152,
+          "actual_us": 5066667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6275646434816619
+        },
+        {
+          "frame": 161,
+          "actual_us": 5366667,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6177251276555754
+        },
+        {
+          "frame": 160,
+          "actual_us": 5333333,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6166421410497518
+        },
+        {
+          "frame": 168,
+          "actual_us": 5600000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6112705979005487
+        },
+        {
+          "frame": 159,
+          "actual_us": 5300000,
+          "shot": 2,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.6105457212250719
+        },
+        {
+          "frame": 59,
+          "actual_us": 1966667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5925791702781735
+        },
+        {
+          "frame": 52,
+          "actual_us": 1733333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5858017561471393
+        },
+        {
+          "frame": 50,
+          "actual_us": 1666667,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5722976475145353
+        },
+        {
+          "frame": 51,
+          "actual_us": 1700000,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5683919429000077
+        },
+        {
+          "frame": 43,
+          "actual_us": 1433333,
+          "shot": 1,
+          "relation": "other_shot",
+          "same_pixels": false,
+          "cosine": 0.5569793342164202
+        }
+      ]
+    }
+  ]
+}

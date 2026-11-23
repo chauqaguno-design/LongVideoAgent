@@ -1,0 +1,2818 @@
+openapi: 3.1.0
+info:
+  title: VideoMind target API contracts
+  version: 1.0.0
+  description: 待实施目标合同，不代表当前仓库已提供这些路由。由adapter与现有路由共存。workspace来自验证后的Bearer身份和membership；客户端不能任意指定workspace。
+servers:
+- url: http://localhost:8000
+security:
+- BearerAuth: []
+paths:
+  /v1/capabilities:
+    get:
+      operationId: getCapabilities
+      summary: 模型与专用能力状态
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Capabilities
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+  /v1/projects:
+    post:
+      operationId: createProject
+      summary: 创建项目
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Project
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/ProjectCreate
+    get:
+      operationId: listProjects
+      summary: 列出当前工作空间项目
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/Project
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - &id001
+                      type: string
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/projects/{project_id}/assets:
+    post:
+      operationId: createUpload
+      summary: 创建素材上传会话
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/UploadSession
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: &id002
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/UploadCreate
+    get:
+      operationId: listAssets
+      summary: 列出项目素材及可用能力
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/MediaAsset
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/uploads/{upload_id}/complete:
+    post:
+      operationId: completeUpload
+      summary: 完成上传并异步校验探测
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/MediaAsset
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/UploadComplete
+  /v1/uploads/{upload_id}:
+    get:
+      operationId: getUpload
+      summary: 读取可续传上传状态
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/UploadState
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/uploads/{upload_id}/refresh:
+    post:
+      operationId: refreshUpload
+      summary: 重新签发当前用户待上传part的短期URL
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/UploadSession
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/UploadRefresh
+  /v1/projects/{project_id}/query-images:
+    post:
+      operationId: uploadQueryImage
+      summary: 上传用于截图检索的图片
+      description: 接受JPEG/PNG/WebP，最大8MiB；按实际bytes检测格式并限制解码尺寸。返回IMAGE_QUERY artifact_id，随后用于SearchRequest.image_artifact_id。只允许project成员，服务端从身份决定workspace。
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Artifact
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+              - file
+  /v1/assets/{asset_id}:
+    get:
+      operationId: getAsset
+      summary: 查询素材
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/MediaAsset
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema: *id002
+    delete:
+      operationId: deleteAsset
+      summary: 创建删除与派生数据回收作业
+      description: 先写tombstone阻止新访问，再异步清理引用；关联已导出产物按保留策略处理。
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/ProcessingRun
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/media-revisions/{media_revision_id}:
+    get:
+      operationId: getMediaRevision
+      summary: 读取固定源版本与可播放artifact引用
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/MediaRevision
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: media_revision_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/observations/{observation_id}:
+    get:
+      operationId: getObservation
+      summary: 读取原始转写或视觉观察及来源
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Observation
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: observation_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/assets/{asset_id}/observations:
+    get:
+      operationId: listObservations
+      summary: 列出指定素材的带时间观察
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/Observation
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/assets/{asset_id}/processing-runs:
+    post:
+      operationId: createProcessingRun
+      summary: 启动或续跑指定能力处理
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/ProcessingRun
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/ProcessingCreate
+    get:
+      operationId: listProcessingRuns
+      summary: 恢复素材的处理历史
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/ProcessingRun
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/processing-runs/{processing_run_id}:
+    get:
+      operationId: getProcessingRun
+      summary: 查询处理进度
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/ProcessingRun
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: processing_run_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/processing-runs/{processing_run_id}/cancel:
+    post:
+      operationId: cancelProcessingRun
+      summary: 取消处理
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/ProcessingRun
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: processing_run_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/CancelRequest
+  /v1/assets/{asset_id}/coverage:
+    get:
+      operationId: getCoverage
+      summary: 读取当前媒体版本覆盖记录
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/CoverageRecord
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/search:
+    post:
+      operationId: searchMedia
+      summary: 文字或截图多路检索
+      description: 同步候选检索，不执行全片穷尽验证。FIRST/ALL/COUNT返回verification_required=true；顶层query_id只标识本次检索，CoverageSummary.query_run_id标识持久验证WorkflowRun。无已验证workflow时coverage不能是PROTOCOL_COMPLETE。candidate_count不是确认事件总数，truncated必须反映展示/召回截断。完整全局答案通过WorkflowCreate和AnswerResult产物返回。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/SearchResult
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/SearchRequest
+  /v1/evidence/{evidence_id}:
+    get:
+      operationId: getEvidence
+      summary: 读取可回溯证据
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Evidence
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: evidence_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/artifacts/{artifact_id}:
+    get:
+      operationId: getArtifact
+      summary: 返回受权限控制的短期产物URL
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Artifact
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: artifact_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/workflow-runs:
+    post:
+      operationId: createWorkflow
+      summary: 创建问答检查或编辑工作流
+      description: 幂等创建。可选supersedes={run_id,expected_state_version}仅用于显式替换同workspace/project的非终态run；先幂等回放，再CAS检查，事务内创建新run并将指定旧run标SUPERSEDED。不得替换项目中其他并行run。旧run已SUCCEEDED/FAILED/CANCELLED/SUPERSEDED则409
+        STATE_CONFLICT；补充信息恢复请使用resume。
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/WorkflowRun
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/WorkflowCreate
+  /v1/projects/{project_id}/workflow-runs:
+    get:
+      operationId: listWorkflows
+      summary: 从服务端恢复项目任务中心
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/WorkflowRun
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/workflow-runs/{run_id}:
+    get:
+      operationId: getWorkflow
+      summary: 查询工作流
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/WorkflowRun
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/workflow-runs/{run_id}/resume:
+    post:
+      operationId: resumeWorkflow
+      summary: 补充信息后恢复
+      description: 先读取run/idempotency_key的receipt，同payload返回原恢复结果，不同payload=409；新key再检查expected_state_version。仅AWAITING_INPUT及error.retryable=true的FAILED允许恢复到RUNNING；SUCCEEDED/CANCELLED/SUPERSEDED不得恢复。checkpoint、恢复receipt和outbox同事务提交。预算调整另走typed
+        budget endpoint。
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/WorkflowRun
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/WorkflowResume
+  /v1/workflow-runs/{run_id}/budget:
+    patch:
+      operationId: adjustWorkflowBudget
+      summary: 由授权用户结构化调整预算
+      description: 仅用户API可调用，模型工具无此权限。先查幂等receipt再CAS state_version。新上限不能低于已commit+reserved部分；更新审计与outbox。定价缺失且需要货币硬预算时阻塞付费调用，不能伪造0成本。预算修改不自动恢复已终态run。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/WorkflowRun
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/BudgetAdjust
+  /v1/workflow-runs/{run_id}/cancel:
+    post:
+      operationId: cancelWorkflow
+      summary: 取消工作流及未完成子任务
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/WorkflowRun
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/CancelRequest
+  /v1/workflow-runs/{run_id}/events:
+    get:
+      operationId: streamWorkflowEvents
+      summary: 订阅工作流事件
+      description: SSE。Last-Event-ID使用服务生成event_id；服务查其sequence补发。ID不属于本run或过期则返回409
+        CURSOR_EXPIRED，客户端先GET状态快照，再从新cursor订阅。事件至少一次传输，客户端按event_id去重；心跳不计业务sequence。
+      responses:
+        '200':
+          description: SSE stream; each data line validates against Event. Snapshot
+            cursor and state are transactionally consistent.
+          content:
+            text/event-stream:
+              schema: *id001
+              x-event-schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Event
+              example: 'id: 00000000-0000-4000-8000-000000000090
+
+                event: progress
+
+                data: {"event_id": "00000000-0000-4000-8000-000000000090", "run_id":
+                "00000000-0000-4000-8000-000000000091", "sequence": 1, "type": "PROGRESS",
+                "created_at": "2026-11-23T10:00:00Z", "payload": {"phase": "RETRIEVING"}}
+
+
+                '
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema: *id002
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema: *id002
+  /v1/edit-projects:
+    post:
+      operationId: createEditProject
+      summary: 创建revision0为空的编辑项目
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/EditProject
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/EditProjectCreate
+  /v1/projects/{project_id}/edit-projects:
+    get:
+      operationId: listEditProjects
+      summary: 恢复项目下编辑任务
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/EditProject
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/edit-projects/{edit_project_id}:
+    get:
+      operationId: getEditProject
+      summary: 查询编辑项目和head
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/EditProject
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: edit_project_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/edit-projects/{edit_project_id}/revisions:
+    get:
+      operationId: listTimelineRevisions
+      summary: 列出不可变时间线版本
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/TimelineRevision
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: edit_project_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/edit-projects/{edit_project_id}/revisions/{revision_id}:
+    get:
+      operationId: getTimelineRevision
+      summary: 读取固定时间线版本
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/TimelineRevision
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: edit_project_id
+        in: path
+        required: true
+        schema: *id002
+      - name: revision_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/edit-projects/{edit_project_id}/operations:
+    post:
+      operationId: patchTimeline
+      summary: 提交幂等且校验expected_revision的修改
+      description: 同idempotency_key同payload重试返回原receipt并标记replayed；不同payload=409 IDEMPOTENCY_CONFLICT；新key但expected_revision过期=409
+        REVISION_CONFLICT。必须事务提交revision、operation receipt和outbox。
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/OperationReceipt
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '200':
+          description: Idempotent replay of an already committed operation
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/OperationReceipt
+      parameters:
+      - name: edit_project_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/TimelinePatch
+  /v1/render-jobs:
+    post:
+      operationId: createRender
+      summary: 对固定revision创建或复用渲染作业
+      description: 提交前验证revision归属与至少一个有效clip；空或编译时长0返回422 EMPTY_TIMELINE且不创建队列任务。编译manifest绑定具体render_job/profile，包含输出到源区间映射。
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/RenderJob
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/RenderCreate
+  /v1/edit-projects/{edit_project_id}/render-jobs:
+    get:
+      operationId: listRenderJobs
+      summary: 读取编辑项目各版本预览导出历史
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/RenderJob
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: edit_project_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/render-jobs/{render_job_id}:
+    get:
+      operationId: getRender
+      summary: 获取渲染状态和artifact
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/RenderJob
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: render_job_id
+        in: path
+        required: true
+        schema: *id002
+  /v1/render-jobs/{render_job_id}/cancel:
+    post:
+      operationId: cancelRender
+      summary: 请求停止渲染
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/RenderJob
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: render_job_id
+        in: path
+        required: true
+        schema: *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/domain.schema.json#/$defs/CancelRequest
+  /v1/workflow-runs/{run_id}/team-tasks:
+    get:
+      operationId: listTeamTasks
+      summary: 读取团队任务状态
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/TeamTask
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+  /v1/workflow-runs/{run_id}/mailbox-events:
+    get:
+      operationId: listMailboxEvents
+      summary: 读取可展示的团队事件
+      description: 资源权限由服务端身份和workspace membership校验。
+      responses:
+        '200':
+          description: Cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: ./schemas/domain.schema.json#/$defs/MailboxEvent
+                    minItems: 0
+                  next_cursor:
+                    anyOf:
+                    - *id001
+                    - type: 'null'
+                required:
+                - items
+                - next_cursor
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '404':
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '409':
+          description: Version, idempotency or state conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '422':
+          description: Schema or media invariant invalid
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '429':
+          description: Rate or budget limit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+        '503':
+          description: Required capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/domain.schema.json#/$defs/Error
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema: *id002
+      - name: cursor
+        in: query
+        required: false
+        schema: *id001
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer

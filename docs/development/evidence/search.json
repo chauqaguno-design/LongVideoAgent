@@ -1,0 +1,291 @@
+{
+  "scope": "Retrieval and evaluation slice; operations receipts are development measurements unless a task explicitly says otherwise.",
+  "tasks": [
+    {
+      "id": "T02-008",
+      "status": "VERIFIED",
+      "notes": "Verified real BGE-M3 1024d from one SHA-256-checked model file. Chinese, English, and code-switched queries returned the known three dialogue timestamps via Qdrant HTTP and a SQLite development catalogue.",
+      "evidence": [
+        "src/dovideo/application/evidence_search.py",
+        "tests/retrieval_grounding/test_encoder_spaces.py",
+        "docs/development/search.md",
+        "work/spec-evidence/search/bge-acquisition.json",
+        "work/spec-evidence/search/server-qdrant/bge-dialogue.json"
+      ]
+    },
+    {
+      "id": "T02-009",
+      "status": "IN_PROGRESS",
+      "notes": "ADR pinned actual model digest/dimensions/preprocess, tiny real image-to-image development test. Multilingual and near-negative quality not established.",
+      "evidence": [
+        "docs/development/search.md",
+        "work/spec-evidence/search/dense-qdrant/screenshot-smoke.json",
+        "work/spec-evidence/search/server-qdrant/screenshot-smoke.json"
+      ]
+    },
+    {
+      "id": "T02-010",
+      "status": "VERIFIED",
+      "notes": "Real trained Qwen frame vectors are cached in space-specific generation. Independent screenshot and scoped ROI work without OCR. Equal-dimension checkpoint changes are rejected.",
+      "evidence": [
+        "tests/retrieval_grounding/test_encoder_spaces.py",
+        "work/spec-evidence/search/dense-qdrant/screenshot-smoke.json",
+        "tests/retrieval_grounding/test_search.py",
+        "work/spec-evidence/search/server-qdrant/screenshot-smoke.json"
+      ]
+    },
+    {
+      "id": "T02-011",
+      "status": "IN_PROGRESS",
+      "notes": "Expired SQL query scopes, MinIO derived query files, source/generation-filtered Qdrant points and unreferenced local vector caches reclaimed. Dry run/retry, shared content and cross-tenant isolation, and deletion during inference tested. Other component invalidation belongs to media.",
+      "evidence": [
+        "tests/retrieval_grounding/test_encoder_spaces.py",
+        "tests/retrieval_grounding/test_real_pipeline.py",
+        "work/spec-evidence/search/audit-summary.json"
+      ]
+    },
+    {
+      "id": "T02-012",
+      "status": "VERIFIED",
+      "notes": "Two published generations on MySQL 8.0.43 + Qdrant 1.15.5 with true BGE + Qwen vectors: in-flight old generation stable; new lookups see the new generation; SQL space manifest on empty encoder cache restores both routes. Tests cover missing checkpoints and equal-dimension wrong namespace separately.",
+      "evidence": [
+        "src/dovideo/application/evidence_search.py",
+        "tests/retrieval_grounding/test_encoder_spaces.py",
+        "work/spec-evidence/search/dense-qdrant/screenshot-smoke.json",
+        "work/spec-evidence/search/server-qdrant/bge-dialogue.json",
+        "work/spec-evidence/search/server-qdrant/screenshot-smoke.json",
+        "work/spec-evidence/search/server-qdrant/mysql-generation.json"
+      ]
+    },
+    {
+      "id": "T03-001",
+      "status": "VERIFIED",
+      "notes": "Workspace, project, revision and range bound before every route and rechecked for deletes; multi-source FIRST rejected. Stable fingerprint and frozen generation.",
+      "evidence": [
+        "src/dovideo/application/evidence_search.py",
+        "tests/retrieval_grounding/test_search.py",
+        "work/spec-evidence/search/qdrant-scope.json",
+        "work/spec-evidence/search/server-qdrant/acl.json",
+        "work/spec-evidence/search/server-qdrant/mysql-generation.json"
+      ]
+    },
+    {
+      "id": "T03-002",
+      "status": "VERIFIED",
+      "notes": "Genuine BGE-M3 in the installed API resolved 3/3 real bilingual sample queries (hybrid also 3/3); embedded text and outage/partial transport lexical fallback covered.",
+      "evidence": [
+        "tests/retrieval_grounding/test_search.py",
+        "tests/retrieval_grounding/test_real_pipeline.py",
+        "docs/development/search.md",
+        "work/spec-evidence/search/bge-acquisition.json",
+        "work/spec-evidence/search/server-qdrant/bge-dialogue.json"
+      ]
+    },
+    {
+      "id": "T03-003",
+      "status": "VERIFIED",
+      "notes": "Authenticated image upload/ROI; true transformed screenshot and source anchor without OCR, encoder-space/version rejection and workspace isolation.",
+      "evidence": [
+        "tests/retrieval_grounding/test_search.py",
+        "tests/retrieval_grounding/test_encoder_spaces.py",
+        "work/spec-evidence/search/dense-qdrant/screenshot-smoke.json",
+        "work/spec-evidence/search/qdrant-scope.json",
+        "work/spec-evidence/search/server-qdrant/screenshot-smoke.json"
+      ]
+    },
+    {
+      "id": "T03-004",
+      "status": "VERIFIED",
+      "notes": "Deterministic RRF(60), within-route source deduplication, component provenance and independent route scores.",
+      "evidence": [
+        "src/dovideo/application/evidence_search.py",
+        "tests/retrieval_grounding/test_search.py"
+      ]
+    },
+    {
+      "id": "T03-005",
+      "status": "IN_PROGRESS",
+      "notes": "Bounded same-pixel proof; optional workflow Flash path owned by workflow; no real paid verification or optional dedicated reranker run.",
+      "evidence": [
+        "src/dovideo/application/evidence_search.py",
+        "tests/retrieval_grounding/test_real_pipeline.py"
+      ]
+    },
+    {
+      "id": "T03-006",
+      "status": "IN_PROGRESS",
+      "notes": "Exact source RGB/ROI confirms a frame at mapped PTS and query-specific citations; arbitrary action boundaries are unverified.",
+      "evidence": [
+        "src/dovideo/application/evidence_search.py",
+        "tests/retrieval_grounding/test_search.py",
+        "tests/retrieval_grounding/test_real_pipeline.py"
+      ]
+    },
+    {
+      "id": "T03-007",
+      "status": "IN_PROGRESS",
+      "notes": "Persisted scan snapshot, same-run retry, verified subtitle coverage and earliest-prefix eligibility. Temporal model scan and semantic prefix completeness await external evidence.",
+      "evidence": [
+        "src/dovideo/application/evidence_search.py",
+        "tests/retrieval_grounding/test_search.py"
+      ]
+    },
+    {
+      "id": "T03-008",
+      "status": "IN_PROGRESS",
+      "notes": "Exact subtitle instances deduplicated across chunks, sparse protocol gives lower bound, full list pages independently of topK. Arbitrary visual exhaustive counts unverified.",
+      "evidence": [
+        "tests/retrieval_grounding/test_search.py",
+        "tests/retrieval_grounding/test_real_pipeline.py"
+      ]
+    },
+    {
+      "id": "T03-009",
+      "status": "IN_PROGRESS",
+      "notes": "Public search/answer/evidence/signed-file integration with real source and time map; frontend release evidence tracked by root. Query image, ROI provenance, proof and complete occurrence list use tenant-scoped durable object bytes and independently recover across decoder caches; ACL rechecked after deletion.",
+      "evidence": [
+        "tests/retrieval_grounding/test_search.py",
+        "tests/retrieval_grounding/test_real_pipeline.py"
+      ]
+    },
+    {
+      "id": "T03-010",
+      "status": "BLOCKED",
+      "notes": "Frozen denominator, negative and independent adjudication, global time coverage, failure statuses and digest-pinned operational controls tested; external blind dataset remains unavailable.",
+      "evidence": [
+        "src/dovideo/evaluation/video_grounding.py",
+        "work/spec-evidence/search/development-metrics.json",
+        "docs/development/search.md",
+        "work/spec-evidence/search/audit-summary.json"
+      ]
+    },
+    {
+      "id": "T03-011",
+      "status": "IN_PROGRESS",
+      "notes": "Scopes, origin ACLs, source deletion, checkpoint mismatch, restored pinned generation and failure fallback tested; full platform cancellation/fault acceptance pending.",
+      "evidence": [
+        "tests/retrieval_grounding/test_search.py",
+        "tests/retrieval_grounding/test_real_pipeline.py",
+        "tests/retrieval_grounding/test_encoder_spaces.py",
+        "work/spec-evidence/search/qdrant-scope.json",
+        "work/spec-evidence/search/server-qdrant/acl.json",
+        "work/spec-evidence/search/server-qdrant/mysql-generation.json",
+        "work/spec-evidence/search/audit-summary.json"
+      ]
+    },
+    {
+      "id": "T03-012",
+      "status": "BLOCKED",
+      "notes": "No qualifying frozen blind benchmark run; 3/3 source anchors in a three-frame dev fixture cannot establish release recall/precision.",
+      "evidence": [
+        "work/spec-evidence/search/development-metrics.json",
+        "work/spec-evidence/search/dense-qdrant/screenshot-smoke.json"
+      ]
+    },
+    {
+      "id": "T07-002",
+      "status": "BLOCKED",
+      "notes": "Manifest validator and a real-content dev sample exist. Independent blind data collection and human adjudication outstanding.",
+      "evidence": [
+        "src/dovideo/evaluation/video_grounding.py",
+        "work/spec-evidence/search/development-metrics.json",
+        "work/spec-evidence/search/audit-summary.json"
+      ]
+    },
+    {
+      "id": "T07-005",
+      "status": "BLOCKED",
+      "notes": "10k scoped authenticated benchmark and embedding dev measurements exist. Full quality/queue/resource release acceptance outstanding.",
+      "evidence": [
+        "work/spec-evidence/search/benchmark-10k.json",
+        "work/spec-evidence/search/dense-qdrant/screenshot-smoke.json",
+        "work/spec-evidence/search/development-metrics.json",
+        "work/spec-evidence/search/audit-summary.json"
+      ]
+    },
+    {
+      "id": "T07-010",
+      "status": "IN_PROGRESS",
+      "notes": "Raw retriever artifacts and declared limits available for root's overall release report.",
+      "evidence": [
+        "docs/development/search.md",
+        "work/spec-evidence/search/benchmark-10k.json",
+        "work/spec-evidence/search/dense-qdrant/screenshot-smoke.json",
+        "work/spec-evidence/search/qdrant-scope.json",
+        "work/spec-evidence/search/audit-summary.json"
+      ]
+    },
+    {
+      "id": "T07-009",
+      "status": "IN_PROGRESS",
+      "notes": "Actual isolated authenticated 2h sparse-source journey, source evidence, preview, stale revision recovery, reorder, final export with full decode and SSE resumption at event 1. Overall release frontend/browser signoff tracked separately by root.",
+      "evidence": [
+        "scripts/verify_long_journey.py",
+        "work/spec-evidence/long-journey/journey.json",
+        "work/spec-evidence/long-journey/validation.json",
+        "work/spec-evidence/long-journey/export.mp4"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "AT-012",
+      "status": "BLOCKED",
+      "notes": "Blind text recall not measured."
+    },
+    {
+      "id": "AT-013",
+      "status": "BLOCKED",
+      "notes": "Tiny real image development run only."
+    },
+    {
+      "id": "AT-014",
+      "status": "IN_PROGRESS",
+      "notes": "Pre-topK tenant filters and deterministic fusion tested; optional real reranking/Flash not measured."
+    },
+    {
+      "id": "AT-015",
+      "status": "IN_PROGRESS",
+      "notes": "Sampled PTS proof and uncertainty exercised; temporal action boundary quality pending."
+    },
+    {
+      "id": "AT-016",
+      "status": "BLOCKED",
+      "notes": "Exact subtitle scope coverage supported. Blind global recall/correctness unavailable."
+    },
+    {
+      "id": "AT-017",
+      "status": "IN_PROGRESS",
+      "notes": "Unsupported action and conflicts visible in local query paths; full blind claims and combined UI release not measured."
+    },
+    {
+      "id": "AT-044",
+      "status": "IN_PROGRESS",
+      "notes": "Earliest cannot be established over a prefix gap. Semantic fair scan evidence pending."
+    },
+    {
+      "id": "AT-052",
+      "status": "IN_PROGRESS",
+      "notes": "Paging full results beyond topK and verified vs observed count tested; parent tracks other coverage UI acceptance."
+    },
+    {
+      "id": "AT-056",
+      "status": "IN_PROGRESS",
+      "notes": "Standalone 10k search/queue request acceptance measured; end-to-end service lifetime metrics and blind acceptance pending."
+    }
+  ],
+  "paths": {
+    "documentation": "docs/development/search.md",
+    "quality": "work/spec-evidence/search/development-metrics.json",
+    "performance": "work/spec-evidence/search/benchmark-10k.json",
+    "scoped_qdrant": "work/spec-evidence/search/qdrant-scope.json",
+    "visual": "work/spec-evidence/search/dense-qdrant/screenshot-smoke.json",
+    "bge_model": "work/spec-evidence/search/bge-acquisition.json",
+    "bge_dialogue": "work/spec-evidence/search/server-qdrant/bge-dialogue.json",
+    "qdrant_server_acl": "work/spec-evidence/search/server-qdrant/acl.json",
+    "qdrant_server_visual": "work/spec-evidence/search/server-qdrant/screenshot-smoke.json",
+    "mysql_publication": "work/spec-evidence/search/server-qdrant/mysql-generation.json",
+    "long_journey": "work/spec-evidence/long-journey/journey.json",
+    "handbook08_audit": "work/spec-evidence/search/audit-summary.json"
+  }
+}

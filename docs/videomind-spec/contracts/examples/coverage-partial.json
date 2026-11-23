@@ -1,0 +1,23 @@
+{
+  "coverage_id": "00000000-0000-4000-8000-000000000040",
+  "workspace_id": "00000000-0000-4000-8000-000000000002",
+  "project_id": "00000000-0000-4000-8000-000000000001",
+  "media_revision_id": "00000000-0000-4000-8000-000000000003",
+  "processing_run_id": "00000000-0000-4000-8000-000000000041",
+  "modality": "VISUAL",
+  "policy_version": "coverage-v1",
+  "query_fingerprint": null,
+  "range": {
+    "start_us": 0,
+    "end_us": 60000000
+  },
+  "stage": "DECODED",
+  "protocol_id": "overview-60s-4plus4-v1",
+  "query_run_id": null,
+  "frame_artifact_ids": [
+    "00000000-0000-4000-8000-000000000004"
+  ],
+  "evidence_ids": [],
+  "max_observation_gap_us": 47988000,
+  "failure_reason": null
+}

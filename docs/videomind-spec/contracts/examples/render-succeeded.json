@@ -1,0 +1,15 @@
+{
+  "render_job_id": "00000000-0000-4000-8000-000000000070",
+  "workspace_id": "00000000-0000-4000-8000-000000000002",
+  "revision_id": "00000000-0000-4000-8000-000000000030",
+  "status": "SUCCEEDED",
+  "profile": "PREVIEW",
+  "renderer_version": "renderer-v1",
+  "cache_key": "example-only-content-key",
+  "progress": 1,
+  "artifact_id": "00000000-0000-4000-8000-000000000071",
+  "validation_report_id": "00000000-0000-4000-8000-000000000072",
+  "compiled_manifest_artifact_id": "00000000-0000-4000-8000-000000000073",
+  "cancel_requested_at": null,
+  "error": null
+}

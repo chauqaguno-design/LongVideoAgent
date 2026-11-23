@@ -1,80 +1,53 @@
-# 映溯 CineTrace
+# ReelCue · 镜寻剪辑台
 
-在浏览器中上传一部 MP4，查看台词、字幕和画面动作，点击任何一条证据即可跳回原片。Python 后端同时提供网页和 API，前端使用原生 HTML、CSS、JavaScript。
+ReelCue 是一个可以边查边剪的视频工作台。选中一部视频，输入“哪一段说了『Wait a minute』？”，点时间戳回看原片。接着说“把刚才第一段剪出来”“前面再留两秒，然后导出”，工作台会沿用这次选中的片段和剪辑版本。
 
-## 本机启动
+## 在工作台里能做什么
 
-在仓库根目录打开 PowerShell，使用 Python 3.11 或 3.12。
+- **上传和读笔记。** 在「素材处理」上传视频，查看处理阶段和缺口。观影笔记把已取得的字幕、转写、画面文字和画面观察关联到原片时间。
+- **查台词和画面。** 在「检索片段」输入文字，或上传截图并圈选局部。候选带有原片区间和证据，可以回看，也可以加入时间线。对已提取的内嵌字幕，可按原文核查出现次数和范围。
+- **在对话里交代任务。** 每段对话选定一部原片。系统判断需要检索、核对画面还是生成剪辑，并显示执行计划。查到多个符合的片段时，可回复“第 2 段”继续。
+- **调整和导出。** 在聊天中要求调整起止点，也可以在「时间线」手动排列片段、设置原声或静音、添加字幕。预览和导出都绑定到具体版本，默认成片为 MP4，也可选择 WebM 或 MKV。
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-.\.venv\Scripts\python -m cinetrace
-```
+当前动作复核最多检查检索返回的三个候选。查询全片首次出现或总次数时，可以从结果中查看实际覆盖范围。[检索和证据说明](docs/development/search.md)
 
-打开 [本地视频工作台](http://127.0.0.1:8791/)。上传完成后可关闭网页，后台进程会继续构建时间线。重新打开页面可查看历史素材。修改 `.env` 后重新启动服务。Linux / macOS 可使用 `.venv/bin/python` 执行相同模块。
+## 本地启动
 
-## 选择模型
-
-| 功能 | 配置 |
-|---|---|
-| 语音 | 默认使用本机 CPU 上的 faster-whisper `turbo`。首次加载会下载权重。可把 `CINETRACE_WHISPER_MODEL` 设为 `base` 或已下载的模型目录。 |
-| 动作 | 本地 Qwen3-VL-2B-Instruct 比较镜头内的连续画面，用中文描述人物、可见动作和物体交互。SmolVLM2 提供轻量的代表帧描述。配置百炼的 `DASHSCOPE_BASE_URL` 和 `DASHSCOPE_API_KEY` 后，系统优先把静音片段发给 `qwen3-vl-plus`。 |
-| 字幕 | 自动读取内封文本字幕。烧录或位图字幕可通过 `CINETRACE_OCR=1` 启用本地 PP-OCRv5。 |
-
-本地模式先检测硬切，再把长镜头均分为最多 4 秒的小段。每条证据的时间是模型看过的片段范围。在「证据 → 动作」中展开「对照原片画面」，可以查看并点击片段前、中、后部的三张原始画面。已有素材可点「重新分析画面」，复用原片、语音和字幕，更新动作证据、场景和索引。两小时影片至少需要 1800 个这样的窗口，适合先用短片评估速度和质量。
+准备 Python 3.12、Node.js 22.12 或以上版本，以及 PATH 中的 FFmpeg 和 ffprobe。下例使用 Windows PowerShell，默认在本机保存媒体与任务。
 
 ```powershell
-.\.venv\Scripts\python -m pip install -r requirements-local-vision.txt
-.\.venv\Scripts\hf download Qwen/Qwen3-VL-2B-Instruct --revision 89644892e4d85e24eaac8bacfd4f463576704203 --local-dir data/models/Qwen3-VL-2B-Instruct
+git clone https://github.com/chauqaguno-design/LongVideoAgent.git ReelCue
+cd ReelCue
+py -3.12 -m venv .venv
+.venv/Scripts/python -m pip install -c constraints-py312.txt -e ".[test]"
+.venv/Scripts/python -m uvicorn dovideo.presentation.api.app:create_app --factory --host 127.0.0.1 --port 8173
 ```
 
-在 `.env` 中设置 `CINETRACE_LOCAL_VISION=data/models/Qwen3-VL-2B-Instruct` 并重启。模型权重约 4.3 GB。若选择轻量模型，将该变量指向下方的 SmolVLM2 目录。它从每个小段选择一张代表帧，英文描述由本机翻译并缓存；「查看英文原文」可用于对照。
+另开终端，在仓库根目录执行前端命令。
 
 ```powershell
-.\.venv\Scripts\hf download HuggingFaceTB/SmolVLM2-256M-Video-Instruct --exclude 'onnx/*' --local-dir data/models/SmolVLM2-256M-Video-Instruct
-.\.venv\Scripts\hf download Helsinki-NLP/opus-mt-en-zh --revision 408d9bc410a388e1d9aef112a2daba955b945255 --include '*.json' '*.spm' 'pytorch_model.bin' --local-dir data/models/opus-mt-en-zh
+cd client
+npm ci
+$env:VITE_DEV_PROXY_TARGET = 'http://127.0.0.1:8173'
+npm run dev -- --host 127.0.0.1 --port 5175
 ```
 
-要启用烧录字幕识别，安装 `paddlepaddle==3.2.2` 和 `paddleocr==3.3.2`，再设置 `CINETRACE_OCR=1`。PP-OCRv5 的检测和识别权重会在首次使用时下载。完成配置后可在原任务上点击「重试未完成的处理」，复用已完成的轨道。
+打开工作台后，注册本地账号，创建素材项目。在「素材处理」上传一段带内嵌字幕的视频，待索引发布后就可以在「对话与任务」里查台词并剪辑。[打开本地工作台](http://127.0.0.1:5175/)
 
-## 从上传到回看
+纯本地模式可以读取内嵌字幕、处理明确时间段并运行剪辑。语音转写、OCR、向量编码和在线画面复核需要各自的模型或服务。配置示例列出对应的环境变量。[配置示例](.env.example) · [运行与恢复](docs/development/operations.md)
 
-1. 浏览器逐片校验和上传，每片 5 MiB。中断后重新选择同一文件即可续传。服务端校验分片、合并原片、验证可解码，再安排处理。
-2. 单个后台 Worker 将轨道进度和时间戳写入 SQLite。重启后，任务从已保存的位置继续。某一轨缺模型或失败时，其他轨道照常可用。
-3. 时间线以原片毫秒为准。每个约 30 秒的检索块引用原始证据，相邻块组成场景目录。场景提要从关联证据中摘录。页面支持从场景展开到检索块、筛选证据和定位播放。
+## 代码与验证
 
-本地业务数据在 `data/`。运行一个 API 进程即可同时提供上传和处理，播放器通过 HTTP Range 读取原片。
-
-## 可选服务
-
-- **Kafka**。设置 `CINETRACE_KAFKA=localhost:9092` 并安装 `confluent-kafka`。上传完成和重试时，SQLite 事务会同时标记待发通知；后台向 `cinetrace.context` 投递并在收到通知时唤醒 Worker。单机模式直接消费 SQLite 队列。
-- **Qdrant**。设置 `CINETRACE_QDRANT_URL=local`，向量会写入本机 `data/qdrant/`；也可填已启动的 Qdrant HTTP 地址。启用后为每个检索块分别编码有内容的语音、字幕、动作描述，以及原始视频画面。索引结果包含影片、构建版本、来源和时间范围，重试按已有点 ID 补写。
-
-使用 Qwen 2B 向量时，先在同一虚拟环境安装 `requirements-local-vision.txt`，再执行下面两行。将 `CINETRACE_EMBED_MODEL` 设置为下载目录，并重启服务。向量模型约 4.3 GB。
+前端使用 Vue 3 和 Vite，API 使用 FastAPI。Python 工作流持久化对话、候选证据、预算和版本，FFmpeg 负责预览与成片。[对话路由与工作流](docs/development/workflow.md) · [前端与浏览器测试](client/README.md)
 
 ```powershell
-.\.venv\Scripts\python -m pip install qdrant-client==1.20.0 qwen-vl-utils==0.0.14 accelerate==1.16.0
-.\.venv\Scripts\hf download Qwen/Qwen3-VL-Embedding-2B --revision 9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda --local-dir data/models/Qwen3-VL-Embedding-2B
+.venv/Scripts/python -m pytest -q
+cd client
+npm test
+npm run test:components
+npm run build
 ```
 
-在已建好索引的素材详情接口 `GET /api/videos/{id}` 中复制影片 ID 和 `index.version`，即可在命令行按文字检索画面。结果是最多五个不同的检索块，带原片起止毫秒。
+## 项目来源与许可
 
-```powershell
-$videoId = Read-Host '影片 ID'
-$detail = Invoke-RestMethod "http://127.0.0.1:8791/api/videos/$videoId"
-.\.venv\Scripts\python -m cinetrace.indexing $videoId $detail.index.version "有人走到桌旁" --source frames
-```
-
-## 测试与设计资料
-
-```powershell
-.\.venv\Scripts\python -m unittest discover -s tests -v
-```
-
-用两小时样片实测过 103 个分片传到一半后恢复、整片摘要校验和片尾 Range 播放。15 秒短片实测过语音、静音画面描述、证据跳转和历史恢复。另用带内封字幕、带烧录中文字幕的样片分别验过两种字幕提取路径。
-
-- [首版 PRD](docs/python-video-context-v1-prd.md) 包含两小时公版测试电影的下载地址和校验值。
-- [模型调用指南](docs/python-video-context-model-quickstart.md) 演示如何从长片截取 15 秒，分别验证画面动作、语音、字幕和向量。
-- [视觉调用示例](examples/describe_clip.py) 可把一段本地 MP4 交给百炼，返回动作在原片中的起止毫秒。
+ReelCue 基于 Morimi-Kazuha 的 VideoMind 继续开发。前端沿用了 DOVideo-AI 的部分代码，原始 MIT 版权声明为 Copyright (c) 2026 Majst。[上游 VideoMind](https://github.com/Morimi-Kazuha/VideoMind) · [前端来源](client/NOTICE.md) · [MIT 许可](LICENSE) · [第三方声明与字体许可](THIRD_PARTY_NOTICES.md)
