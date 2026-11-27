@@ -40,11 +40,48 @@ class ApiSettings:
         return cls(cors_origins=origins or cls().cors_origins)
 
 
+def load_local_dotenv(
+    dotenv_path: Path | None = None,
+    environ: dict[str, str] | None = None,
+) -> Path | None:
+    """Load simple KEY=VALUE pairs from a local .env without overriding set vars."""
+    target = os.environ if environ is None else environ
+    candidates = [dotenv_path] if dotenv_path is not None else [
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parents[4] / ".env",
+    ]
+    chosen = next((path for path in candidates if path is not None and path.is_file()), None)
+    if chosen is None:
+        return None
+    for raw_line in chosen.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        elif " #" in value:
+            value = value.split(" #", 1)[0].rstrip()
+        target.setdefault(key, value)
+    return chosen
+
+
 def create_app(
     *,
     settings: ApiSettings | None = None,
     work_dir: Path | None = None,
 ) -> FastAPI:
+    if (
+        work_dir is None
+        and not os.environ.get("PYTEST_CURRENT_TEST")
+        and os.environ.get("CUTSIEVE_DISABLE_DOTENV") != "1"
+    ):
+        load_local_dotenv()
     selected_settings = settings or ApiSettings.from_environment()
     local_root = Path(work_dir or os.getenv("CUTSIEVE_R1_MEDIA_DIR", "work/r1-media"))
     auth = LocalAuthService(local_root / "local-accounts.sqlite3")

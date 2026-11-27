@@ -253,3 +253,25 @@ def test_sampled_conflicts_attribute_every_clip_and_only_repair_one(times, clip_
     else:
         assert issue["repairability"] == "MANUAL"
         assert repair is None
+
+
+def test_load_local_dotenv_parses_values_without_overriding_existing_env(tmp_path):
+    from cutsieve.presentation.api.app import load_local_dotenv
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# comment\n"
+        "CUTSIEVE_MODEL_MODEL=deepseek-flash # inline note\n"
+        "CUTSIEVE_MODEL_BASE_URL='https://api.deepseek.com/v1'\n"
+        'CUTSIEVE_FFMPEG_DIR="C:/tools/ffmpeg/bin"\n'
+        "CUTSIEVE_KEEP=from-file\n",
+        encoding="utf-8",
+    )
+    target = {"CUTSIEVE_KEEP": "from-shell"}
+    assert load_local_dotenv(env_file, target) == env_file
+    assert target == {
+        "CUTSIEVE_KEEP": "from-shell",
+        "CUTSIEVE_MODEL_MODEL": "deepseek-flash",
+        "CUTSIEVE_MODEL_BASE_URL": "https://api.deepseek.com/v1",
+        "CUTSIEVE_FFMPEG_DIR": "C:/tools/ffmpeg/bin",
+    }

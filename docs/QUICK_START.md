@@ -1,6 +1,6 @@
 # CutSieve 本地快速开始
 
-准备 Python 3.12、Node.js 22.12 或以上版本和 npm。将 FFmpeg 和 ffprobe 加入 PATH，或把 `CUTSIEVE_FFMPEG_DIR` 设为两者所在的目录。
+准备 Python 3.12、Node.js 22.12 或以上版本和 npm。复制 `.env.example` 为 `.env` 并填写 `CUTSIEVE_FFMPEG_DIR`（若 FFmpeg/ffprobe 已在 PATH 中可留空）与模型 API 配置；后端与前端开发服务器都会自动读取根目录 `.env`。
 
 ## 启动工作台
 
