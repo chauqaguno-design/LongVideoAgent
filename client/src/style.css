@@ -1,18 +1,65 @@
 :root {
+  color-scheme: dark;
+  --cs-bg: #090b0f;
+  --cs-bg-subtle: #0d1017;
+  --cs-surface: #121620;
+  --cs-surface-elevated: #171d2a;
+  --cs-surface-hover: #1d2536;
+  --cs-border: rgba(148, 163, 184, 0.14);
+  --cs-border-strong: rgba(148, 163, 184, 0.26);
+  --cs-text: #eef2f7;
+  --cs-text-secondary: #9aa7b8;
+  --cs-text-muted: #6e7c8f;
+  --cs-accent: #f59e0b;
+  --cs-accent-bright: #fbbf24;
+  --cs-accent-soft: rgba(245, 158, 11, 0.13);
+  --cs-accent-border: rgba(245, 158, 11, 0.42);
+  --cs-accent-ink: #1a1204;
+  --cs-teal: #2dd4bf;
+  --cs-teal-soft: rgba(45, 212, 191, 0.12);
+  --cs-teal-border: rgba(45, 212, 191, 0.36);
+  --cs-success: #34d399;
+  --cs-danger: #f87171;
+  --cs-danger-soft: rgba(248, 113, 113, 0.12);
+  --cs-danger-border: rgba(248, 113, 113, 0.35);
+  --cs-radius-sm: 6px;
+  --cs-radius-md: 10px;
+  --cs-radius-lg: 14px;
+  --cs-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --cs-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.42);
+  --cs-font-sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --cs-font-mono: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Consolas, ui-monospace, monospace;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
 body {
   margin: 0;
+  padding: 0;
   min-width: 320px;
   min-height: 100vh;
+  background:
+    radial-gradient(900px 420px at 14% -8%, rgba(245, 158, 11, 0.08), transparent 62%),
+    radial-gradient(760px 420px at 88% -6%, rgba(45, 212, 191, 0.07), transparent 60%),
+    var(--cs-bg);
+  color: var(--cs-text);
+  font-family: var(--cs-font-sans);
+  line-height: 1.5;
+  overflow-x: hidden;
 }
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -21,9 +68,13 @@ a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid #54e5db;
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--cs-accent-bright);
   outline-offset: 2px;
 }
 
-body { background: #0b0c10; }
+::selection {
+  background: rgba(245, 158, 11, 0.28);
+  color: #fff;
+}

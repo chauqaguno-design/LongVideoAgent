@@ -73,6 +73,6 @@ npm run build
 - **可选多模态增强**：语音转写（Faster-Whisper）、画面识字（PaddleOCR）、语义/以图搜帧向量（Qdrant + 本地编码器）及在线视觉复核需按 `.env.example` 配置对应本地权重或 OpenAI 兼容模型接口。
 - **已知边界**：当前离线视觉观察默认关闭以控制费用；在线候选复核每次默认最多检查前 3 个候选区间，小时级长视频的镜头级抽帧、动态变焦复核与持久化全文索引正在后续迭代规划中。
 
-## 来源与许可
+## 许可
 
-CutSieve 基于开源项目 [VideoMind](https://github.com/Morimi-Kazuha/VideoMind) 重构演进，前端包含部分 DOVideo-AI 代码。详情见 [MIT 许可](LICENSE)、[前端声明](client/NOTICE.md) 与 [第三方许可](THIRD_PARTY_NOTICES.md)。
+本项目基于 [MIT License](LICENSE) 开源。
