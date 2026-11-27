@@ -1,4 +1,4 @@
-"""Authenticated revision and render endpoints for the editing workbench."""
+"""Workspace-scoped revision and render endpoints for the editing workbench."""
 from functools import partial
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse, JSONResponse
@@ -12,7 +12,7 @@ from .edit_sources import signature
 from .schemas import CancelRequest, EditProjectCreate, RenderJobCreate, TimelinePatch
 
 
-def install_edit_routes(app, require_user):
+def install_edit_routes(app, workspace_user):
     sources = app.state.edit_sources
     repo = EditRepository(sources)
     worker = app.state.edit_worker = RenderWorker(repo, partial(signature, sources.root, "edit_artifact_content"))
@@ -23,7 +23,7 @@ def install_edit_routes(app, require_user):
         return JSONResponse(dict(code=exc.code, message=str(exc), retryable=exc.status == 503,
                                  request_id=uid(), details={}), status_code=exc.status)
 
-    def workspace(user=Depends(require_user)):
+    def workspace(user=Depends(workspace_user)):
         return sources.workspace(user)
 
     @router.post("/edit-projects", status_code=201)

@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import pytest
 
 from cutsieve.application.edit_instructions import PROFILE
@@ -5,6 +7,19 @@ from cutsieve.application.edit_timeline import uid
 from cutsieve.application.workflow_checkpoint import (
     Checkpoint, ContextManifest, EditBrief, PlanAttempt, RepairHistory, RunSpec,
 )
+
+
+@pytest.fixture
+def use_workspace(monkeypatch):
+    from cutsieve.presentation.api.app import local_workspace_user
+
+    @contextmanager
+    def select(client, user_id):
+        with monkeypatch.context() as patch:
+            patch.setitem(client.app.dependency_overrides, local_workspace_user, lambda: {"id": user_id})
+            yield
+
+    return select
 
 
 @pytest.fixture

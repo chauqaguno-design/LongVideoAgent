@@ -1,4 +1,4 @@
-"""Processing, coverage and evidence for the existing authenticated video source."""
+"""Workspace-scoped media processing, coverage and evidence."""
 
 from uuid import UUID
 
@@ -11,7 +11,7 @@ from cutsieve.infrastructure.persistence.source_tables import sources as sources
 from .schemas import CancelRequest, ProcessingCreate
 
 
-def install_processing(app, require_user):
+def install_processing(app, workspace_user):
     sources = app.state.edit_sources
     worker = app.state.processing = ProcessingWorker(sources)
     sources.enqueue_completed = worker.register_upload
@@ -30,7 +30,7 @@ def install_processing(app, require_user):
     app.state.edit_worker.repo.resolve_track = resolve_track
     api = APIRouter(prefix="/v1")
 
-    def scope(user=Depends(require_user)):
+    def scope(user=Depends(workspace_user)):
         return sources.workspace(user)
 
     @api.post("/assets/{asset_id}/processing-runs", status_code=202)

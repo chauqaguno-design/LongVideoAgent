@@ -17,12 +17,6 @@ def post(client, path, **body):
     return response.json()
 
 
-def login(client, username):
-    credentials = dict(username=username, password="local-chat-tests")
-    post(client, "/user/register", **credentials, nickname="test")
-    client.headers["Authorization"] = "Bearer " + post(client, "/user/login", **credentials)["data"]["token"]
-
-
 def upload(client, project, file):
     path = f"/v1/projects/{project}/assets"
     data = file.read_bytes()
@@ -87,11 +81,10 @@ def source(tmp_path):
 
 
 @pytest.mark.real_media
-def test_find_second_occurrence_preview_extend_export_and_restore(tmp_path, monkeypatch, source):
+def test_find_second_occurrence_preview_extend_export_and_restore(tmp_path, monkeypatch, source, use_workspace):
     monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
     folder = tmp_path / "app"
     with TestClient(create_app(work_dir=folder)) as client:
-        login(client, "ticket_editor")
         project = post(client, "/v1/projects", title="Train")["project_id"]
         media = upload(client, project, source)
         root = f"/v1/projects/{project}/conversation-runs"
@@ -161,7 +154,6 @@ def test_find_second_occurrence_preview_extend_export_and_restore(tmp_path, monk
         artifact = client.get("/v1/artifacts/" + webm_result["export_artifact_id"]).json()
         assert artifact["mime_type"] == "video/webm"
         assert client.get(artifact["url"]).content.startswith(b"\x1aE\xdf\xa3")
-        creds = dict(username="ticket_editor", password="local-chat-tests")
 
         ambiguous = say("把刚才那段剪出来", found)
         state = wait(client, ambiguous, "AWAITING_INPUT")
@@ -199,13 +191,10 @@ def test_find_second_occurrence_preview_extend_export_and_restore(tmp_path, monk
             idempotency_key="bad-parent",
         )
         assert client.post(f"/v1/projects/{other}/conversation-runs", json=foreign_body).status_code == 404
-        login(client, "other_editor")
-        assert client.get(f"/v1/workflow-runs/{final}/conversation").status_code == 404
+        with use_workspace(client, 2):
+            assert client.get(f"/v1/workflow-runs/{final}/conversation").status_code == 404
 
     with TestClient(create_app(work_dir=folder)) as restored:
-        restored.headers["Authorization"] = (
-            "Bearer " + post(restored, "/user/login", **creds)["data"]["token"]
-        )
         view = restored.get(f"/v1/workflow-runs/{final}/conversation").json()
         assert [r["run_id"] for r in view["turns"]] == [found, preview, final]
 
@@ -215,7 +204,6 @@ def test_conversation_rehydrates_the_original_index_after_reprocessing(tmp_path,
     from cutsieve.application.workflow_tools import read_tool
 
     with TestClient(create_app(work_dir=tmp_path / "app")) as client:
-        login(client, "pinned_context")
         project = post(client, "/v1/projects", title="Original index")["project_id"]
         mid = upload(client, project, source)
         key = post(

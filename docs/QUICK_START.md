@@ -21,7 +21,7 @@ $env:CUTSIEVE_DEV_PROXY_TARGET = 'http://127.0.0.1:8173'
 npm run dev -- --host 127.0.0.1 --port 5175
 ```
 
-打开 `http://127.0.0.1:5175/`，注册并创建项目。在素材处理中上传一段带内嵌字幕的视频，等索引发布后搜索一句已知台词，回看原片并把片段加入时间线。可以预览并导出当前版本。
+打开 `http://127.0.0.1:5175/` 即可进入本地工作区并创建项目。在素材处理中上传一段带内嵌字幕的视频，等索引发布后搜索一句已知台词，回看原片并把片段加入时间线。可以预览并导出当前版本。
 
 数据默认保存在 `work/r1-media`。需要换目录时，在启动后端前设置 `CUTSIEVE_R1_MEDIA_DIR`。需要语音转写或 OCR 时，设置 `CUTSIEVE_WHISPER_DIR` 或 `CUTSIEVE_PADDLE_OCR_DIR`，并通过 `CUTSIEVE_MEDIA_PYTHON` 指定装有对应依赖的 Python。
 

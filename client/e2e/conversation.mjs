@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -28,14 +28,7 @@ test('one conversation finds two quotes, clarifies the selection, previews and e
   const output = process.env.CUTSIEVE_EDIT_EVIDENCE
   if (output) await mkdir(output, { recursive: true })
   const button = name => page.getByRole('button', { name, exact: true })
-  const post = (p, data) => page.request.post(base + p, { data })
-  const user = { username: 'chat_' + randomUUID().slice(0, 8), password: randomUUID(), nickname: '本地验收' }
-  assert.ok((await post('/user/register', user)).ok())
   await page.goto(base)
-  await button('登录工作台').click()
-  await page.getByLabel('用户名', { exact: true }).fill(user.username)
-  await page.getByLabel('密码', { exact: true }).fill(user.password)
-  await button('立即登录').click()
   await page.getByLabel('新项目名称').fill('车站对白')
   await button('创建项目').click()
   await button('去添加视频').click()

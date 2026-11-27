@@ -50,10 +50,6 @@ def test_uploaded_source_query_image_grounded_quote_and_delete(tmp_path, monkeyp
     )
     data = video.read_bytes()
     with TestClient(create_app(work_dir=tmp_path / "store")) as client:
-        login = dict(username="researcher", password="local-demo-password")
-        client.post("/user/register", json=dict(login, nickname="测试")).raise_for_status()
-        token = client.post("/user/login", json=login).json()["data"]["token"]
-        client.headers["Authorization"] = "Bearer " + token
         pid = client.post("/v1/projects", json={"title": "scene"}).json()["project_id"]
         ticket = client.post(
             f"/v1/projects/{pid}/assets",

@@ -1,4 +1,4 @@
-"""Restore accounts, source bytes, pinned evidence, timeline and render into an empty directory."""
+"""Restore source bytes, pinned evidence, timeline and render into an empty directory."""
 import hashlib
 import os
 import shutil
@@ -22,11 +22,6 @@ def test_restore_and_render(tmp_path):
     subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=red:size=96x64:rate=25:duration=2",
                     "-i", str(subs), "-c:v", "libx264", "-c:s", "mov_text", str(film)], check=True)
     data = film.read_bytes()
-    credentials = dict(username="restore_editor", password="local-demo-testing")
-
-    def login(c):
-        token = c.post("/user/login", json=credentials).json()["data"]["token"]
-        c.headers["Authorization"] = "Bearer " + token
 
     def post(c, path, payload):
         r = c.post("/v1" + path, json=payload)
@@ -43,8 +38,6 @@ def test_restore_and_render(tmp_path):
 
     src = tmp_path / "source"
     with TestClient(create_app(work_dir=src)) as c:
-        c.post("/user/register", json=dict(credentials, nickname="Local")).raise_for_status()
-        login(c)
         pid = post(c, "/projects", {"title": "恢复演练"})["project_id"]
         upload = post(c, f"/projects/{pid}/assets", dict(filename="story.mp4", size_bytes=len(data), content_type="video/mp4"))
         etag = c.put(upload["parts"][0]["url"], content=data).headers["ETag"]
@@ -63,8 +56,6 @@ def test_restore_and_render(tmp_path):
     assert restore(bundle, target) == count
 
     with TestClient(create_app(work_dir=target)) as c:
-        assert c.get("/v1/workflow-runs/" + rid).status_code == 401
-        login(c)
         assert c.get(f"/v1/workflow-runs/{rid}/result").json() == plan
         assert c.get(old["url"]).status_code in {403, 404}
         new = c.get("/v1/artifacts/" + old["artifact_id"]).json()

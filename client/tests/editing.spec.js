@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import App from '../src/App.vue'
 import EditStudio from '../src/editing/EditStudio.vue'
 import RenderJobs from '../src/editing/RenderJobs.vue'
 import WorkflowTurn from '../src/editing/WorkflowTurn.vue'
@@ -146,14 +147,15 @@ test('clarification goes to the waiting turn and its exchange survives reload', 
   expect(fetch.mock.calls.some(([u]) => u.endsWith('/conversation-runs'))).toBe(false)
 })
 
-test('displays a worker or database outage when readiness returns 503', async () => {
+test('opens the local workspace and displays worker or database outages', async () => {
   const worker = { ready: false, queues: { outbox: {
     online: false, counts: { PENDING: 3, DEAD: 1 }, failed: 1, failure_rate: .25,
   } }, uncertain_model_requests: 0 }
   let status = worker
   vi.stubGlobal('fetch', vi.fn(async url => new URL(url, 'http://local').pathname === '/v1/readiness'
     ? json(status, 503) : json(page([]))))
-  const wrapper = render(EditStudio, { library: [] })
+  const wrapper = render(App)
+  expect(wrapper.get('.workspace-pill').text()).toBe('本地工作区')
   await flushPromises()
   await click(wrapper, '更新服务状态')
   await flushPromises()
@@ -266,7 +268,6 @@ test.each([['webm', 'WebM', 'video/webm'], ['mkv', 'MKV', 'video/x-matroska']])(
 
 test('upload sends bytes only to its signed URL, then completes with the returned ETag', async () => {
   const signed = 'https://storage.test/one-shot?signature=test'
-  localStorage.setItem('authToken', 'session')
   vi.stubGlobal('fetch', vi.fn(async url => {
     if (url === signed) return new Response(null, { headers: { ETag: '"digest"' } })
     if (url.endsWith('/assets')) return json({ upload_mode: 'SINGLE_PUT', upload_id: 'up', parts: [{ part_number: 1, url: signed, headers: { 'Content-Type': 'video/mp4' } }] })
@@ -279,7 +280,6 @@ test('upload sends bytes only to its signed URL, then completes with the returne
   expect(put[1]).toMatchObject({ method: 'PUT', body: file, credentials: 'omit', headers: { 'Content-Type': 'video/mp4' } })
   expect(new Headers(put[1].headers).has('Authorization')).toBe(false)
   expect(JSON.parse(complete[1].body).parts).toEqual([{ part_number: 1, etag: 'digest' }])
-  localStorage.clear()
 })
 
 test('shows the repaired revision and separates preview observations from export checks', async () => {

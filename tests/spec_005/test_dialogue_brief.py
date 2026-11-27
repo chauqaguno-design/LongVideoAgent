@@ -87,9 +87,6 @@ def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_pat
             assert response.is_success, response.text
             return response.json()
 
-        credentials = dict(username="briefeditor", password="fixture-password")
-        post("/user/register", **credentials, nickname="剪辑验收")
-        client.headers["Authorization"] = "Bearer " + post("/user/login", **credentials)["data"]["token"]
         project = post("/v1/projects", title="字幕筛选")["project_id"]
 
         def upload(path):

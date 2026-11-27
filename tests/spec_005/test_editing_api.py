@@ -1,4 +1,4 @@
-"""Authenticated upload, revision-bound export and artifact playback over HTTP."""
+"""Upload, revision-bound export and artifact playback over HTTP."""
 import hashlib
 import os
 import shutil
@@ -11,7 +11,7 @@ from cutsieve.presentation.api.app import create_app
 
 
 @pytest.mark.real_media
-def test_edit_upload_and_render_job(tmp_path):
+def test_edit_upload_and_render_job(tmp_path, use_workspace):
     ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("Real editing API integration needs FFmpeg")
@@ -21,13 +21,8 @@ def test_edit_upload_and_render_job(tmp_path):
     data = video.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     with TestClient(create_app(work_dir=tmp_path / "work")) as client:
-        def login(name):
-            body = dict(username=name,password="demo-password")
-            assert client.post("/user/register", json=dict(body, nickname=name)).status_code == 200
-            return {"Authorization": "Bearer " + client.post("/user/login", json=body).json()["data"]["token"]}
-        alice, bob = login("editor"), login("viewer")
         def post(path, body, expected):
-            reply = client.post(path, json=body, headers=alice)
+            reply = client.post(path, json=body)
             assert reply.status_code == expected, reply.text
             return reply.json()
         project = post("/v1/projects", dict(title="Demo"), 201)
@@ -40,7 +35,8 @@ def test_edit_upload_and_render_job(tmp_path):
         profile = dict(width=96, height=64, fps_num=25, fps_den=1, audio_sample_rate=48000)
         edit = post("/v1/edit-projects", dict(project_id=project_id, title="Demo", output_profile=profile,
                     idempotency_key="create-demo"), 201)
-        assert client.get(f"/v1/edit-projects/{edit['edit_project_id']}", headers=bob).status_code == 404
+        with use_workspace(client, 2):
+            assert client.get(f"/v1/edit-projects/{edit['edit_project_id']}").status_code == 404
         clip = dict(media_revision_id=media["media_revision_id"], evidence_ids=[], audio_policy="keep")
         ops = [dict(op="append_clip",clip=dict(clip,source_start_us=start,source_end_us=end))
                for start,end in [(0,360000),(1000000,1440000)]]
@@ -49,23 +45,24 @@ def test_edit_upload_and_render_job(tmp_path):
         receipt = post(op_url, body, 201)
         assert post(op_url, body, 200)["replayed"]
         broken = dict(body, operations=[dict(op="append_clip", clip=dict(clip, start_ms=0, end_ms=100))])
-        assert client.post(op_url, json=broken, headers=alice).status_code == 422
+        assert client.post(op_url, json=broken).status_code == 422
         job = post("/v1/render-jobs", dict(revision_id=receipt["revision_id"],profile="PREVIEW",
                    idempotency_key="render-demo"), 202)
         for _ in range(150):
-            job = client.get("/v1/render-jobs/"+job["render_job_id"], headers=alice).json()
+            job = client.get("/v1/render-jobs/"+job["render_job_id"]).json()
             if job["status"] in {"SUCCEEDED","FAILED"}:
                 break
             time.sleep(.2)
         assert job["status"] == "SUCCEEDED", job
         artifact_url = "/v1/artifacts/"+job["artifact_id"]
-        assert client.get(artifact_url,headers=bob).status_code == 404
-        artifact = client.get(artifact_url,headers=alice).json()
+        with use_workspace(client, 2):
+            assert client.get(artifact_url).status_code == 404
+        artifact = client.get(artifact_url).json()
         result = client.get(artifact["url"])
         assert result.status_code == 200
         assert hashlib.sha256(result.content).hexdigest() == artifact["sha256"]
         assert client.get(artifact["url"]+"x").status_code == 404
-        ref = client.get("/v1/artifacts/"+job["compiled_manifest_artifact_id"], headers=alice).json()
+        ref = client.get("/v1/artifacts/"+job["compiled_manifest_artifact_id"]).json()
         manifest = client.get(ref["url"]).json()
         assert manifest["total_duration_us"] == 800000
 
@@ -84,12 +81,12 @@ def test_edit_upload_and_render_job(tmp_path):
             assert job["cache_key"] not in slots
             slots.add(job["cache_key"])
             for _ in range(150):
-                job = client.get("/v1/render-jobs/" + job["render_job_id"], headers=alice).json()
+                job = client.get("/v1/render-jobs/" + job["render_job_id"]).json()
                 if job["status"] in {"SUCCEEDED", "FAILED"}:
                     break
                 time.sleep(.2)
             assert job["status"] == "SUCCEEDED", job
-            artifact = client.get("/v1/artifacts/" + job["artifact_id"], headers=alice).json()
+            artifact = client.get("/v1/artifacts/" + job["artifact_id"]).json()
             download = client.get(artifact["url"])
             assert artifact["mime_type"] == download.headers["content-type"] == mime
             assert download.content.startswith(bytes.fromhex("1a45dfa3"))

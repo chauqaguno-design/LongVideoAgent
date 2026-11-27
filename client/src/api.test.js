@@ -1,76 +1,76 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { apiRequest, captureAuthSession, clearAuthToken, setAuthToken } from './api.js'
+import { apiRequest } from './api.js'
 
-test('API network failures produce an actionable message', async () => {
-  globalThis.localStorage = { getItem: () => null }
-  globalThis.fetch = async () => {
-    throw new TypeError('fetch failed')
-  }
-
-  await assert.rejects(apiRequest('/health'), /请确认后端已启动且地址配置正确/)
+test('API network failures produce an actionable message', async t => {
+  const cause = new TypeError('fetch failed')
+  t.mock.method(globalThis, 'fetch', async () => { throw cause })
+  await assert.rejects(apiRequest('/health'), {
+    message: '无法连接后端服务，请确认后端已启动且地址配置正确',
+    cause,
+  })
 })
 
-function authEnvironment() {
-  const storage = new Map()
-  globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) }
-  globalThis.window = new EventTarget()
-  let resolve
-  globalThis.fetch = () => new Promise(done => { resolve = done })
-  let expired = 0
-  window.addEventListener('auth-expired', () => expired++)
-  return { storage, resolve: value => resolve(value), expired: () => expired }
-}
-
-test('stale 401 cannot log out a newer login even when the token text repeats', async () => {
-  const env = authEnvironment()
-  setAuthToken('A')
-  const request = apiRequest('/v1/projects')
-  clearAuthToken()
-  setAuthToken('A')
-  env.resolve(new Response('expired', { status: 401 }))
-  await assert.rejects(request, { name: 'AbortError' })
-  assert.equal(env.storage.get('authToken'), 'A')
-  assert.equal(env.expired(), 0)
+test('API requests preserve abort errors', async t => {
+  const abort = new DOMException('Request aborted', 'AbortError')
+  t.mock.method(globalThis, 'fetch', async () => { throw abort })
+  await assert.rejects(apiRequest('/v1/projects'), error => error === abort)
 })
 
-test('current authenticated 401 expires current session once', async () => {
-  const env = authEnvironment()
-  setAuthToken('A')
-  const request = apiRequest('/v1/projects')
-  env.resolve(new Response('expired', { status: 401 }))
-  assert.equal((await request).status, 401)
-  assert.equal(env.storage.has('authToken'), false)
-  assert.equal(env.expired(), 1)
+test('API envelope exposes its data and preserves the HTTP response metadata', async t => {
+  const data = { project_id: 'local' }
+  const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"title":"Local"}' }
+  const fetch = t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ code: 0, message: '', data }, { status: 202 }))
+
+  const response = await apiRequest('/v1/projects', options)
+  assert.deepEqual(fetch.mock.calls[0].arguments, ['/v1/projects', options])
+  assert.equal(response.ok, true)
+  assert.equal(response.status, 202)
+  assert.equal(response.headers.get('content-type'), 'application/json')
+  assert.deepEqual(await response.json(), data)
+  assert.equal(await response.text(), JSON.stringify(data))
 })
 
-test('late 401 JSON body cannot survive a new login after expiration', async () => {
-  const env = authEnvironment()
-  let resolveBody
-  let bodyStarted
-  const started = new Promise(resolve => { bodyStarted = resolve })
-  const body = new Promise(resolve => { resolveBody = resolve })
-  setAuthToken('A')
-  const request = apiRequest('/v1/projects')
-  env.resolve({ status: 401, headers: new Headers({ 'content-type': 'application/json' }),
-    clone: () => ({ json: () => { bodyStarted(); return body } }) })
-  await started
-  setAuthToken('B')
-  resolveBody({ code: 401, message: 'old expiration', data: null })
-  await assert.rejects(request, { name: 'AbortError' })
-  assert.equal(env.storage.get('authToken'), 'B')
-  assert.equal(env.expired(), 1)
+test('API error envelope exposes its message when data is omitted', async t => {
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ code: 422, message: '请求参数无效' }, { status: 422 }))
+
+  const response = await apiRequest('/v1/projects')
+  assert.equal(response.ok, false)
+  assert.equal(response.status, 422)
+  assert.equal(await response.json(), null)
+  assert.equal(await response.text(), '请求参数无效')
 })
 
-test('logout and cross-tab token change invalidate outstanding successful responses', async () => {
-  for (const mutate of [() => clearAuthToken(), env => env.storage.set('authToken', 'B')]) {
-    const env = authEnvironment()
-    setAuthToken('A')
-    const session = captureAuthSession()
-    const request = apiRequest('/v1/projects')
-    mutate(env)
-    env.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }))
-    await assert.rejects(request, { name: 'AbortError' })
-    assert.equal(session.isCurrent(), false)
-  }
+test('API requests pass through plain JSON with its body intact', async t => {
+  const data = { items: [], next_cursor: null }
+  const original = Response.json(data)
+  t.mock.method(globalThis, 'fetch', async () => original)
+
+  const response = await apiRequest('/v1/projects')
+  assert.equal(response, original)
+  assert.deepEqual(await response.json(), data)
+})
+
+test('API requests pass through SSE with its stream intact', async t => {
+  const event = 'event: completed\ndata: {}\n\n'
+  const original = new Response(event, { headers: { 'Content-Type': 'text/event-stream' } })
+  t.mock.method(globalThis, 'fetch', async () => original)
+
+  const response = await apiRequest('/v1/workflow-runs/run/events')
+  assert.equal(response, original)
+  assert.equal(response.bodyUsed, false)
+  assert.equal(await response.text(), event)
+})
+
+test('API requests pass through binary downloads', async t => {
+  const bytes = Uint8Array.of(1, 2, 255)
+  const original = new Response(bytes, { headers: { 'Content-Type': 'video/mp4' } })
+  t.mock.method(globalThis, 'fetch', async () => original)
+
+  const response = await apiRequest('/v1/artifacts/video')
+  assert.equal(response, original)
+  assert.equal(response.bodyUsed, false)
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes)
 })

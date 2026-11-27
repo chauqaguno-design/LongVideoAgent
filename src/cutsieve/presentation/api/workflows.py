@@ -1,4 +1,4 @@
-"""Authenticated workflow controls, immutable output, and resumable SSE."""
+"""Workspace-scoped workflow controls, immutable output, and resumable SSE."""
 
 import asyncio
 import json
@@ -30,7 +30,7 @@ class ChatTurn(BaseModel):
     budget: Budget | None = None
 
 
-def install_workflow_routes(app, require_user):
+def install_workflow_routes(app, workspace_user):
     sources = app.state.edit_sources
     edits = app.state.edit_worker.repo
     repo = WorkflowRepository(edits)
@@ -56,7 +56,7 @@ def install_workflow_routes(app, require_user):
     edits.resolve_evidence = resolve_evidence
     router = APIRouter(prefix="/v1")
 
-    def workspace(user=Depends(require_user)):
+    def workspace(user=Depends(workspace_user)):
         return sources.workspace(user)
 
     def require_enabled():

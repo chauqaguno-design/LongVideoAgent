@@ -76,9 +76,6 @@ def test_socket_timeout_and_decoded_export_have_correlated_durable_traces(tmp_pa
 
     # Read the public trace and signed validation report on a fresh API instance.
     with TestClient(create_app(work_dir=root)) as client:
-        credentials = dict(username="trace_editor", password="fixture-password")
-        login = json_body(client.post("/user/login", json=credentials))
-        client.headers["Authorization"] = "Bearer " + login["data"]["token"]
         timeout = events(client, failed)
         final = next(p for p in timeout if p.get("activity") == "model.failed")
         start = next(p for p in timeout if p.get("activity") == "model.reserved")

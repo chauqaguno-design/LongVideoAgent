@@ -1,4 +1,4 @@
-"""Two tenants import visually identical media and use the real local worker/API."""
+"""Two workspace scopes import visually identical media using the local worker and API."""
 import os
 import shutil
 import subprocess
@@ -27,11 +27,6 @@ def wait_for(client, url, active):
 
 
 def prepare_workspace(client, folder, ffmpeg, name):
-    auth = dict(username=name, password="fixture-password")
-    client.headers.pop("Authorization", None)
-    json_body(client.post("/user/register", json=dict(auth, nickname=name)))
-    token = json_body(client.post("/user/login", json=auth))["data"]["token"]
-    client.headers["Authorization"] = "Bearer " + token
     project = json_body(client.post("/v1/projects", json={"title": name}))["project_id"]
     caption, movie = folder / f"{name}.srt", folder / f"{name}.mp4"
     caption.write_text(f"1\n00:00:00,100 --> 00:00:00,800\nShared ticket {name}\n", encoding="utf8")
@@ -71,7 +66,7 @@ def prepare_workspace(client, folder, ffmpeg, name):
     state = wait_for(client, base, {"QUEUED", "RUNNING", "WAITING_JOB"})
     assert state["status"] == "SUCCEEDED", state
     edit = json_body(client.get(base + "/result"))
-    return dict(token=token, project=project, asset=aid, upload=upload["upload_id"], media=media,
+    return dict(project=project, asset=aid, upload=upload["upload_id"], media=media,
                 evidence=proof["evidence_id"], observation=observation, frame=frame,
                 image=query_image["artifact_id"], run=run, result=state["result_artifact_id"],
                 edit=edit["edit_project_id"], revision=edit["revision_id"], job=edit["export_job_id"],
@@ -119,7 +114,6 @@ def scoped_writes(client, resources):
 
 def exercise_controls(client, resources):
     """Use a separate draft and an awaiting-input run so both can be changed safely."""
-    client.headers["Authorization"] = "Bearer " + resources["token"]
     json_body(client.get("/v1/capabilities"))
     json_body(client.get("/v1/projects"))
     create = dict(project_id=resources["project"], title="Cut", idempotency_key="create-timeline",
@@ -155,35 +149,37 @@ def exercise_controls(client, resources):
 
 
 @pytest.mark.real_media
-def test_two_workspaces_share_pixels_and_request_keys_but_only_read_their_results(tmp_path, monkeypatch):
+def test_two_workspaces_share_pixels_and_request_keys_but_only_read_their_results(tmp_path, monkeypatch, use_workspace):
     ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
     monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
     with TestClient(create_app(work_dir=tmp_path / "app")) as client:
-        one, two = (prepare_workspace(client, tmp_path, ffmpeg, name) for name in ("first_editor", "second_editor"))
-        for own, foreign in ((one, two), (two, one)):
-            client.headers["Authorization"] = "Bearer " + own["token"]
-            unknown = {key: str(uuid4()) for key in foreign}
-            for path in RESOURCE_PATHS:
-                own_response = client.get("/v1" + path.format(**own))
-                own_response.raise_for_status()
-                denied = client.get("/v1" + path.format(**foreign))
-                absent = client.get("/v1" + path.format(**unknown))
-                assert error_body(denied) == error_body(absent), path
-            for denied, absent in zip(scoped_writes(client, foreign), scoped_writes(client, unknown), strict=True):
-                assert error_body(denied) == error_body(absent)
-            # Both projects contain the same blue frames, indexed and cached by the local workers.
-            image_search = dict(scope=own["scope"], image_artifact_id=own["image"], query_mode="LOCAL", top_k=5)
-            hits = json_body(client.post("/v1/search", json=image_search))["hits"]
-            assert hits and {h["media_revision_id"] for h in hits} == {own["media"]}
-            for resource in ("image", "media"):
-                def query(key):
-                    if resource == "image":
-                        return dict(image_search, image_artifact_id=key)
-                    return dict(image_search, scope=dict(project_id=own["project"], media_revision_ids=[key]))
-                for submit in (lambda q: client.post("/v1/search", json=q),
-                               lambda q: client.post(f"/v1/projects/{own['project']}/search-workflows",
-                                    json=dict(search=q, idempotency_key="second-search"))):
-                    assert error_body(submit(query(foreign[resource]))) == error_body(submit(query(unknown[resource])))
+        one = prepare_workspace(client, tmp_path, ffmpeg, "first_editor")
+        with use_workspace(client, 2):
+            two = prepare_workspace(client, tmp_path, ffmpeg, "second_editor")
+        for user_id, own, foreign in ((1, one, two), (2, two, one)):
+            with use_workspace(client, user_id):
+                unknown = {key: str(uuid4()) for key in foreign}
+                for path in RESOURCE_PATHS:
+                    own_response = client.get("/v1" + path.format(**own))
+                    own_response.raise_for_status()
+                    denied = client.get("/v1" + path.format(**foreign))
+                    absent = client.get("/v1" + path.format(**unknown))
+                    assert error_body(denied) == error_body(absent), path
+                for denied, absent in zip(scoped_writes(client, foreign), scoped_writes(client, unknown), strict=True):
+                    assert error_body(denied) == error_body(absent)
+                # Both projects contain the same blue frames, indexed and cached by the local workers.
+                image_search = dict(scope=own["scope"], image_artifact_id=own["image"], query_mode="LOCAL", top_k=5)
+                hits = json_body(client.post("/v1/search", json=image_search))["hits"]
+                assert hits and {h["media_revision_id"] for h in hits} == {own["media"]}
+                for resource in ("image", "media"):
+                    def query(key):
+                        if resource == "image":
+                            return dict(image_search, image_artifact_id=key)
+                        return dict(image_search, scope=dict(project_id=own["project"], media_revision_ids=[key]))
+                    for submit in (lambda q: client.post("/v1/search", json=q),
+                                   lambda q: client.post(f"/v1/projects/{own['project']}/search-workflows",
+                                        json=dict(search=q, idempotency_key="second-search"))):
+                        assert error_body(submit(query(foreign[resource]))) == error_body(submit(query(unknown[resource])))
         exercise_controls(client, one)

@@ -10,23 +10,13 @@ from fastapi.testclient import TestClient
 from cutsieve.presentation.api.app import create_app
 
 
-def sign_in(client, name, *, register=False):
-    credentials = dict(username=name, password="local-test-password")
-    if register:
-        client.post("/user/register", json=dict(credentials, nickname=name)).raise_for_status()
-    response = client.post("/user/login", json=credentials)
-    response.raise_for_status()
-    client.headers["Authorization"] = "Bearer " + response.json()["data"]["token"]
-
-
 @pytest.mark.real_media
-def test_same_name_versions_and_reopening_project(tmp_path):
+def test_same_name_versions_and_reopening_project(tmp_path, use_workspace):
     ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required for real source version test")
     work = tmp_path / "app"
     with TestClient(create_app(work_dir=work)) as client:
-        sign_in(client, "maker", register=True)
         project = client.post("/v1/projects", json={"title": "旧片重剪"}).json()["project_id"]
         uploaded_sources = []
         for color in ("red", "blue"):
@@ -51,19 +41,17 @@ def test_same_name_versions_and_reopening_project(tmp_path):
         assert len(client.get(f"/v1/projects/{project}/assets").json()["items"]) == 2
 
     with TestClient(create_app(work_dir=work)) as client:
-        sign_in(client, "maker")
         for asset, path in uploaded_sources:
             revision = client.get("/v1/media-revisions/" + asset["media_revision_id"]).json()
             artifact = client.get("/v1/artifacts/" + revision["source_artifact_id"]).json()
             assert client.get(artifact["url"]).content == path.read_bytes()
-        sign_in(client, "other", register=True)
-        assert client.get(f"/v1/projects/{project}/assets").status_code == 404
-        assert client.get("/v1/media-revisions/" + asset["media_revision_id"]).status_code == 404
+        with use_workspace(client, 2):
+            assert client.get(f"/v1/projects/{project}/assets").status_code == 404
+            assert client.get("/v1/media-revisions/" + asset["media_revision_id"]).status_code == 404
 
 
 def test_upload_validates_format_and_actual_bytes(tmp_path):
     with TestClient(create_app(work_dir=tmp_path)) as client:
-        sign_in(client, "editor", register=True)
         project = client.post("/v1/projects", json={"title": "上传"}).json()["project_id"]
         assets = f"/v1/projects/{project}/assets"
         body = dict(filename="scene.mp4", content_type="video/mp4", size_bytes=4)

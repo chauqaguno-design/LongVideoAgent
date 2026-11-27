@@ -1,6 +1,6 @@
 # CutSieve 前端
 
-Vue 3 / Vite 暗房剪辑工作台客户端，提供对话式检索与剪辑、素材离线处理监控、多模态证据检索、可视化比例时间线与预览导出。完整产品说明和后端启动步骤见 [根目录 README](../README.md) 与 [本地快速开始](../docs/QUICK_START.md)。
+Vue 3 / Vite 暗房剪辑工作台客户端，打开即进入本地工作区。客户端提供对话式检索与剪辑、素材离线处理监控、多模态证据检索、可视化比例时间线与预览导出。完整产品说明和后端启动步骤见 [根目录 README](../README.md) 与 [本地快速开始](../docs/QUICK_START.md)。
 
 ```bash
 npm ci
@@ -18,6 +18,8 @@ npm run dev
 
 ## 浏览器端到端验收
 
-- `npm run test:e2e:edit`：设置 `CUTSIEVE_EDIT_SAMPLE`（至少 4 秒视频）与 `CUTSIEVE_EDIT_UI`（默认 `http://127.0.0.1:5175`），验证注册、上传、两段剪辑、改序、刷新恢复、预览播放、导出与版本回滚。
+浏览器端到端验收使用独立的本地工作区，每次运行会创建测试项目。
+
+- 运行 `npm run test:e2e:edit` 前设置 `CUTSIEVE_EDIT_SAMPLE`（至少 4 秒视频）与 `CUTSIEVE_EDIT_UI`（默认 `http://127.0.0.1:5175`），即可验证上传、两段剪辑、改序、刷新恢复、预览播放、导出与版本回滚。
 - `npm run test:e2e:conversation`：基于回环地址的 `CUTSIEVE_EDIT_UI`，用 FFmpeg 生成带重复台词的测试片，验证多轮查询、澄清、预览与导出。
 - 架构说明见 [ARCHITECTURE.md](../docs/ARCHITECTURE.md)。

@@ -1,4 +1,4 @@
-"""Project-authorized evidence search and screenshot uploads."""
+"""Project-scoped evidence search and screenshot uploads."""
 
 import hmac
 from io import BytesIO
@@ -17,7 +17,7 @@ from .edit_sources import signature, utc
 from .schemas import Crop
 
 
-def install_search_routes(app, require_user):
+def install_search_routes(app, workspace_user):
     sources = app.state.edit_sources
     from cutsieve.infrastructure.search_encoder import local_encoder
 
@@ -27,7 +27,7 @@ def install_search_routes(app, require_user):
     app.state.processing.catalog.prepare_search_rows = search.prepare_rows
     router = APIRouter(prefix="/v1")
 
-    def workspace(user=Depends(require_user)):
+    def workspace(user=Depends(workspace_user)):
         return sources.workspace(user)
 
     def artifact(scope, key, request):

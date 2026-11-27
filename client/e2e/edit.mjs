@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { randomUUID } from 'node:crypto'
 import { access, mkdir, open } from 'node:fs/promises'
 import path from 'node:path'
 import { chromium } from 'playwright-core'
 
-// Run against an isolated application database. Each run creates a test user and project.
+// Run against an isolated local workspace. Each run creates a test project.
 test('upload, trim two ranges, preview, reorder and export a pinned version', { timeout: 180000 }, async t => {
   const file = process.env.CUTSIEVE_EDIT_SAMPLE
   assert.ok(file, 'Set CUTSIEVE_EDIT_SAMPLE to a video at least four seconds long.')
@@ -35,16 +34,10 @@ test('upload, trim two ranges, preview, reorder and export a pinned version', { 
   }
   const completed = profile => page.getByText(profile + ' · 已完成', { exact: true }).waitFor({ timeout: 60000 })
   const output = process.env.CUTSIEVE_EDIT_EVIDENCE
-  let stage = '登录'
+  let stage = '打开本地工作区'
   try {
     await page.goto(base)
-    await page.locator('.navbar').getByRole('button', { name: '登录 / 注册' }).click()
-    await button('去注册').click()
-    await page.getByLabel('用户名', { exact: true }).fill(process.env.CUTSIEVE_EDIT_TEST_USER || 'edit_' + randomUUID().slice(0, 8))
-    await page.getByLabel('密码', { exact: true }).fill(process.env.CUTSIEVE_EDIT_TEST_PASSWORD || randomUUID())
-    await page.getByLabel('昵称', { exact: true }).fill('剪辑验收')
-    await button('提交注册').click()
-    await button('立即登录').click()
+    await page.getByText('本地工作区', { exact: true }).waitFor()
     stage = '创建项目并上传'
     await page.getByLabel('新项目名称').fill('样片验收')
     await button('创建项目').click()

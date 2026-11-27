@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -17,8 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from cutsieve.infrastructure.persistence.sqlalchemy import Base
 
-from .runtime import LocalAuthService, R1ServiceError
-from .schemas import LoginRequest, RegisterRequest
+from .runtime import R1ServiceError
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +70,11 @@ def load_local_dotenv(
     return chosen
 
 
+def local_workspace_user() -> dict[str, int]:
+    # Preserve the workspace associated with the original first local account.
+    return {"id": 1}
+
+
 def create_app(
     *,
     settings: ApiSettings | None = None,
@@ -84,7 +88,6 @@ def create_app(
         load_local_dotenv()
     selected_settings = settings or ApiSettings.from_environment()
     local_root = Path(work_dir or os.getenv("CUTSIEVE_R1_MEDIA_DIR", "work/r1-media"))
-    auth = LocalAuthService(local_root / "local-accounts.sqlite3")
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -109,15 +112,12 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(title=selected_settings.title, version="0.1.0", lifespan=lifespan)
-    app.state.auth = auth
     app.state.settings = selected_settings
-    allow_credentials = "*" not in selected_settings.cors_origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(selected_settings.cors_origins),
-        allow_credentials=allow_credentials,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Accept", "Idempotency-Key", "Last-Event-ID", "Content-Range"],
+        allow_headers=["Content-Type", "Accept", "Idempotency-Key", "Last-Event-ID", "Content-Range"],
         expose_headers=["ETag"],
     )
 
@@ -151,21 +151,18 @@ def create_app(
         # configuration values through the HTTP error contract.
         return _error("服务暂不可用", 500, 500)
 
-    def require_user(request: Request) -> dict[str, Any]:
-        return auth.require(request.headers.get("authorization"))
-
     from .edit_sources import install_source_routes
     from .editing import install_edit_routes
     from .capabilities import install_caps
     from .media_processing import install_processing
     from .search import install_search_routes
     from .workflows import install_workflow_routes
-    install_source_routes(app, require_user, local_root)
-    install_edit_routes(app, require_user)
-    install_processing(app, require_user)
-    install_search_routes(app, require_user)
-    install_workflow_routes(app, require_user)
-    install_caps(app, require_user)
+    install_source_routes(app, local_workspace_user, local_root)
+    install_edit_routes(app, local_workspace_user)
+    install_processing(app, local_workspace_user)
+    install_search_routes(app, local_workspace_user)
+    install_workflow_routes(app, local_workspace_user)
+    install_caps(app, local_workspace_user)
 
     @app.get("/", include_in_schema=False)
     async def root() -> JSONResponse:
@@ -174,29 +171,6 @@ def create_app(
     @app.get("/health")
     async def health() -> JSONResponse:
         return _ok("ok")
-
-    @app.post("/user/register")
-    async def register(payload: RegisterRequest) -> JSONResponse:
-        data = auth.register(
-            payload.username,
-            payload.password,
-            payload.nickname,
-        )
-        return _ok(data, "注册成功")
-
-    @app.post("/user/login")
-    async def login(payload: LoginRequest) -> JSONResponse:
-        data = auth.login(payload.username, payload.password)
-        return _ok(data, "登录成功")
-
-    @app.post("/user/logout")
-    async def logout(request: Request, _user: dict[str, Any] = Depends(require_user)) -> JSONResponse:
-        auth.logout(request.headers.get("authorization"))
-        return _ok(None, "退出成功")
-
-    @app.get("/user/me")
-    async def current_user(user: dict[str, Any] = Depends(require_user)) -> JSONResponse:
-        return _ok(user)
 
     return app
 

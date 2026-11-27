@@ -26,10 +26,6 @@ def test_corrupt_video_payload_with_intact_header_is_rejected(tmp_path):
     size = struct.unpack(">I", data[i - 4 : i])[0]
     data[i + 4 : i + size - 4] = bytes(size - 8)
     with TestClient(create_app(work_dir=tmp_path / "server")) as client:
-        login = dict(username="asset_reader", password="testing-source")
-        client.post("/user/register", json=dict(login, nickname="test")).raise_for_status()
-        token = client.post("/user/login", json=login).json()["data"]["token"]
-        client.headers["Authorization"] = "Bearer " + token
         project = client.post("/v1/projects", json={"title": "source validation"}).json()["project_id"]
         target = f"/v1/projects/{project}/assets"
         body = dict(filename="film.mp4", size_bytes=len(data), content_type="video/mp4")

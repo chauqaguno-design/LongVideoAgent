@@ -11,7 +11,7 @@ from cutsieve.application.edit_timeline import EditError
 from cutsieve.application.workflow_state import DEFAULT_BUDGET, NeedsInput
 from cutsieve.infrastructure.providers.workflow_flash import FlashPlanner
 from cutsieve.presentation.api.app import create_app
-from test_conversation_runs import login, post, source, upload, wait
+from test_conversation_runs import post, source, upload, wait
 
 
 def test_context_limits_and_reference_survive_natural_wording():
@@ -67,7 +67,6 @@ def test_flash_planner_uses_configured_identity_and_protocol():
 def test_routed_visual_question_and_edit_with_unrelated_dialogue(tmp_path, monkeypatch, source):
     monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
     with TestClient(create_app(work_dir=tmp_path / "app")) as client:
-        login(client, "visual_route")
         project = post(client, "/v1/projects", title="画面与台词")["project_id"]
         mid = upload(client, project, source)
 
@@ -159,7 +158,6 @@ def test_bounded_inspection_supplies_visual_evidence_before_edit(tmp_path, monke
     with TestClient(create_app(work_dir=tmp_path / "app")) as client:
         provider = LocalVisualProtocol()
         client.app.state.workflow_worker.planner = provider
-        login(client, "bounded_visual")
         project = post(client, "/v1/projects", title="原片复核")["project_id"]
         mid = upload(client, project, source)
         for editing, text in [

@@ -24,11 +24,6 @@ def test_resume_after_restart(tmp_path, monkeypatch):
         check=True,
     )
     data = src.read_bytes()
-    credentials = dict(username="local_editor", password="only-for-this-test")
-
-    def login(client):
-        token = client.post("/user/login", json=credentials).json()["data"]["token"]
-        client.headers["Authorization"] = "Bearer " + token
 
     def put(client, part):
         n = part["part_number"]
@@ -38,8 +33,6 @@ def test_resume_after_restart(tmp_path, monkeypatch):
         return dict(part_number=n, etag=reply.headers["ETag"])
 
     with TestClient(create_app(work_dir=tmp_path / "store")) as client:
-        client.post("/user/register", json=dict(credentials, nickname="编辑")).raise_for_status()
-        login(client)
         p = client.post("/v1/projects", json={"title": "分片"}).json()["project_id"]
         upload = client.post(
             f"/v1/projects/{p}/assets",
@@ -56,7 +49,6 @@ def test_resume_after_restart(tmp_path, monkeypatch):
         assert put(client, first) == receipt
         assert client.put(first["url"], content=b"x" * 1024).status_code == 409
     with TestClient(create_app(work_dir=tmp_path / "store")) as client:
-        login(client)
         path = "/v1/uploads/" + upload["upload_id"]
         assert len(client.get(path).json()["uploaded_parts"]) == 1
         body = dict(idempotency_key="complete-once", parts=[receipt])

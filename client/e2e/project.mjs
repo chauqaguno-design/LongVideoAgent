@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import test from 'node:test'
 import { chromium } from 'playwright-core'
 
-// The selected local fixture must contain the supplied dialogue. Uses its own test account.
+// Run against an isolated local workspace with a fixture containing the supplied dialogue.
 test('upload, read notes, seek by dialogue, search by screenshot and ask with evidence', { timeout: 240000 }, async t => {
   const base = process.env.CUTSIEVE_EDIT_UI || 'http://127.0.0.1:5175'
   const file = process.env.CUTSIEVE_EDIT_SAMPLE, quote = process.env.CUTSIEVE_TEST_QUOTE
@@ -17,9 +17,6 @@ test('upload, read notes, seek by dialogue, search by screenshot and ask with ev
   const viewport = { width: 1360, height: 900 }
   const demo = process.env.CUTSIEVE_DEMO_VIDEO
   const page = await browser.newPage({ viewport, recordVideo: demo ? { dir: path.dirname(demo), size: viewport } : undefined })
-  const user = { username: 'journey_' + randomUUID().slice(0, 8), password: randomUUID() }
-  const registered = await page.request.post(base + '/user/register', { data: { ...user, nickname: '本地验收' } })
-  assert.ok(registered.ok())
   const button = name => page.getByRole('button', { name, exact: true })
   const evidenceResponse = id => page.waitForResponse(response => {
     const path = new URL(response.url()).pathname
@@ -42,10 +39,6 @@ test('upload, read notes, seek by dialogue, search by screenshot and ask with ev
     playback[name] = { expected_seconds: target, actual_seconds: await page.getByLabel('证据原片回看').evaluate(video => video.currentTime) }
   }
   await page.goto(base + '/#edit')
-  await button('登录工作台').click()
-  await page.getByLabel('用户名', { exact: true }).fill(user.username)
-  await page.getByLabel('密码', { exact: true }).fill(user.password)
-  await button('立即登录').click()
   await page.getByLabel('新项目名称').fill('证据检索验收')
   await button('创建项目').click()
   await button('去添加视频').click()

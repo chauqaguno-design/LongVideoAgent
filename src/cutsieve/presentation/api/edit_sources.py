@@ -52,7 +52,7 @@ def signature(root, action, scope, resource, expires):
     return hmac.digest(signing_key(root), f"{action}|{scope}|{resource}|{expires}".encode(), "sha256").hex()
 
 
-def install_source_routes(app, require_user, work_dir):
+def install_source_routes(app, workspace_user, work_dir):
     root = work_dir / "editing"
     engine = app.state.edit_local_engine = create_sqlalchemy_engine(
         URL.create("sqlite", database=str(root / "editing.sqlite3"))
@@ -60,7 +60,7 @@ def install_source_routes(app, require_user, work_dir):
     store = app.state.edit_sources = EditSources(engine, root)
     router = APIRouter(prefix="/v1")
 
-    def workspace(user=Depends(require_user)):
+    def workspace(user=Depends(workspace_user)):
         return store.workspace(user)
 
     def signed_url(request, name, scope, resource, expires):

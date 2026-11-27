@@ -24,7 +24,7 @@ def test_plan_spreads_base_budget_across_two_hours_and_covers_tail():
 
 
 @pytest.mark.real_media
-def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch):
+def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch, use_workspace):
     exe = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not exe:
         pytest.skip("FFmpeg required")
@@ -56,10 +56,6 @@ def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch)
         check=True,
     )
     with TestClient(create_app(work_dir=tmp_path / "app")) as http:
-        login = dict(username="processor", password="demopassword")
-        http.post("/user/register", json=dict(login, nickname="测")).raise_for_status()
-        token = http.post("/user/login", json=login).json()["data"]["token"]
-        http.headers["Authorization"] = "Bearer " + token
         project = http.post("/v1/projects", json=dict(title="影片")).json()["project_id"]
         data = movie.read_bytes()
         session = http.post(
@@ -111,11 +107,6 @@ def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch)
         metrics = http.get("/v1/readiness").json()
         assert metrics["ready"] and metrics["queues"]["render"]["counts"]["SUCCEEDED"] >= 1
         assert metrics["uncertain_model_requests"] == 0
-        other = dict(username="unrelated", password="separate-account")
-        http.post("/user/register", json=dict(other, nickname="独立项目")).raise_for_status()
-        foreign = {"Authorization": "Bearer " + http.post("/user/login", json=other).json()["data"]["token"]}
-        assert http.get("/v1/readiness", headers=foreign).json()["queues"]["render"]["counts"] == {}
-        assert http.get(f"/v1/assets/{aid}/caption-track", headers=foreign).status_code == 404
         cat = http.app.state.processing.catalog
         scope = asset["workspace_id"]
         first_gen, rows = cat.search_scope(scope, project, [asset["media_revision_id"]])
@@ -128,7 +119,10 @@ def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch)
         proof = next(r["evidence_id"] for r in rows if r["claim"] == "打开红门")
         item = http.post(previews, json=[proof]).json()[proof]
         assert item["text"] == "打开红门" and http.get(item["thumbnail"]).status_code == 200
-        assert http.post(previews, json=[proof], headers=foreign).status_code == 404
+        with use_workspace(http, 2):
+            assert http.get("/v1/readiness").json()["queues"]["render"]["counts"] == {}
+            assert http.get(f"/v1/assets/{aid}/caption-track").status_code == 404
+            assert http.post(previews, json=[proof]).status_code == 404
         reply = http.delete(f"/v1/assets/{aid}")
         assert reply.status_code == 202
         assert http.get(frame["url"]).status_code == 404

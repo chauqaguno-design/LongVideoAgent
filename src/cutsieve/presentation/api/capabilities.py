@@ -41,13 +41,13 @@ def capabilities(env):
     )
 
 
-def install_caps(app, require_user):
-    @app.get("/v1/capabilities", dependencies=[Depends(require_user)])
+def install_caps(app, workspace_user):
+    @app.get("/v1/capabilities")
     def get_capabilities():
         return capabilities(os.environ)
 
     @app.get("/v1/readiness")
-    def readiness(user=Depends(require_user)):
+    def readiness(user=Depends(workspace_user)):
         store = app.state.edit_sources
         scope = store.workspace(user)
         queues = {}

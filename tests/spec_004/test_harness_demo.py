@@ -22,7 +22,7 @@ from cutsieve.infrastructure.persistence.render_worker import media_binaries
 from cutsieve.infrastructure.persistence.workflow_tables import runs
 from cutsieve.infrastructure.persistence.workflow_worker import WorkflowWorker
 from cutsieve.presentation.api.app import create_app
-from test_conversation_runs import login, post, upload
+from test_conversation_runs import post, upload
 
 
 class ControlledCoverage:
@@ -174,7 +174,6 @@ def test_grounded_edit_recovery_repair_and_export(tmp_path, monkeypatch, color_m
     directory = tmp_path / "app"
     app = create_app(work_dir=directory)
     with TestClient(app) as client:
-        login(client, "harness_demo")
         app.state.workflow_worker.planner = ControlledCoverage()
         project = post(client, "/v1/projects", title="可复现镜头修复")["project_id"]
         media = upload(client, project, color_movie)

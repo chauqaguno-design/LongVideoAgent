@@ -82,10 +82,6 @@ def test_natural_time_request_preview_and_restore_after_restart(tmp_path, monkey
         check=True,
     )
     media = source.read_bytes()
-    creds = dict(username="workflow", password="test-password")
-
-    def sign_in(c):
-        c.headers["Authorization"] = "Bearer " + c.post("/user/login", json=creds).json()["data"]["token"]
 
     def post(c, path, body):
         resp = c.post(path, json=body)
@@ -104,8 +100,6 @@ def test_natural_time_request_preview_and_restore_after_restart(tmp_path, monkey
 
     work = tmp_path / "app"
     with TestClient(create_app(work_dir=work)) as c:
-        post(c, "/user/register", dict(creds, nickname="editor"))
-        sign_in(c)
         pid = post(c, "/v1/projects", {"title": "Movie"})["project_id"]
         upl = post(
             c,
@@ -151,7 +145,6 @@ def test_natural_time_request_preview_and_restore_after_restart(tmp_path, monkey
         assert c.get(f"/v1/workflow-runs/{state['run_id']}/result").json() == result
     monkeypatch.setenv("CUTSIEVE_WORKFLOWS_ENABLED", "true")
     with TestClient(create_app(work_dir=work)) as c:
-        sign_in(c)
         assert c.get(f"/v1/workflow-runs/{state['run_id']}/result").json() == result
         change = post(
             c,
