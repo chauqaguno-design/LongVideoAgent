@@ -5,12 +5,12 @@ from threading import Barrier
 import pytest
 from sqlalchemy import func, select
 
-from dovideo.application.edit_sources import EditSources
-from dovideo.application.edit_timeline import EditError, uid
-from dovideo.infrastructure.persistence.edit_repository import EditRepository, project_view
-from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES, events, jobs, projects, revisions
-from dovideo.infrastructure.persistence.source_tables import projects as source_projects, sources as source_rows
-from dovideo.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.application.edit_timeline import EditError, uid
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository, project_view
+from cutsieve.infrastructure.persistence.edit_tables import EDIT_TABLES, events, jobs, projects, revisions
+from cutsieve.infrastructure.persistence.source_tables import projects as source_projects, sources as source_rows
+from cutsieve.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
 
 
 PROFILE = dict(width=320, height=240, fps_num=24, fps_den=1, audio_sample_rate=48000)
@@ -106,7 +106,7 @@ def test_empty_timeline_does_not_enqueue(setup):
 
 
 def test_job_replay_and_cancel_fences_expired_attempt(setup):
-    from dovideo.infrastructure.persistence.render_worker import RenderWorker
+    from cutsieve.infrastructure.persistence.render_worker import RenderWorker
     repo, scope, edit, clip = setup
     rev = apply(repo, scope, edit, 0, "add-clips", dict(op="append_clip", clip=clip))
     request = dict(revision_id=rev["revision_id"], profile="EXPORT", idempotency_key="render-0001")

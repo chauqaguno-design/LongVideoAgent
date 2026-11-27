@@ -6,11 +6,11 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 import pytest
 
-from dovideo.application.edit_instructions import referenced_edit, relative_window
-from dovideo.application.edit_timeline import EditError
-from dovideo.application.workflow_state import DEFAULT_BUDGET, NeedsInput
-from dovideo.infrastructure.providers.workflow_flash import FlashPlanner
-from dovideo.presentation.api.app import create_app
+from cutsieve.application.edit_instructions import referenced_edit, relative_window
+from cutsieve.application.edit_timeline import EditError
+from cutsieve.application.workflow_state import DEFAULT_BUDGET, NeedsInput
+from cutsieve.infrastructure.providers.workflow_flash import FlashPlanner
+from cutsieve.presentation.api.app import create_app
 from test_conversation_runs import login, post, source, upload, wait
 
 
@@ -40,10 +40,10 @@ def test_flash_planner_uses_configured_identity_and_protocol():
             return {"model": "local-vlm-v1"}
 
     env = {
-        "DOVIDEO_MODEL_BASE_URL": "http://127.0.0.1:8000/v1",
-        "DOVIDEO_MODEL_MODEL": "local-vlm",
-        "DOVIDEO_MODEL_VERSION": "local-vlm-v1",
-        "DOVIDEO_WORKFLOW_LIVE_MODEL": "1",
+        "CUTSIEVE_MODEL_BASE_URL": "http://127.0.0.1:8000/v1",
+        "CUTSIEVE_MODEL_MODEL": "local-vlm",
+        "CUTSIEVE_MODEL_VERSION": "local-vlm-v1",
+        "CUTSIEVE_WORKFLOW_LIVE_MODEL": "1",
     }
     planner = FlashPlanner(env, Transport())
     identity = planner.identity(vision=True)
@@ -54,7 +54,7 @@ def test_flash_planner_uses_configured_identity_and_protocol():
     assert url.endswith("/v1/chat/completions") and headers == {} and timeout == 1
     assert payload["model"] == "local-vlm" and payload["response_format"] == {"type": "json_object"}
 
-    env["DOVIDEO_MODEL_NATIVE_TOOLS"] = "1"
+    env["CUTSIEVE_MODEL_NATIVE_TOOLS"] = "1"
     with pytest.raises(EditError) as changed:
         planner.request([], identity, [], 1)
     assert changed.value.code == "MODEL_CHANGED" and len(calls) == 1
@@ -65,7 +65,7 @@ def test_flash_planner_uses_configured_identity_and_protocol():
 
 @pytest.mark.real_media
 def test_routed_visual_question_and_edit_with_unrelated_dialogue(tmp_path, monkeypatch, source):
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
+    monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
     with TestClient(create_app(work_dir=tmp_path / "app")) as client:
         login(client, "visual_route")
         project = post(client, "/v1/projects", title="画面与台词")["project_id"]
@@ -107,12 +107,12 @@ class LocalVisualProtocol:
     """A controlled adapter checks the real, ordered JPEG inputs. No HTTP inference is sent."""
 
     env = dict(
-        DOVIDEO_CHAT_LIVE_MODEL="1",
-        DOVIDEO_WORKFLOW_LIVE_MODEL="1",
-        DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="10000",
-        DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="50",
-        DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="50",
-        DOVIDEO_FLASH_PRICE_VERSION="fixture",
+        CUTSIEVE_CHAT_LIVE_MODEL="1",
+        CUTSIEVE_WORKFLOW_LIVE_MODEL="1",
+        CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="10000",
+        CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="50",
+        CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="50",
+        CUTSIEVE_FLASH_PRICE_VERSION="fixture",
     )
 
     def __init__(self):

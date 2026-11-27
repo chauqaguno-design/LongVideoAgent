@@ -1,7 +1,7 @@
 import pytest
 
-from dovideo.application.media_memory import ocr_occurrences, speech_flags, viewing_notes
-from dovideo.infrastructure.media.visual_observations import validated_claims
+from cutsieve.application.media_memory import ocr_occurrences, speech_flags, viewing_notes
+from cutsieve.infrastructure.media.visual_observations import validated_claims
 
 
 def test_ocr_unbroken_text_merges_but_reappearing_text_is_a_new_occurrence():

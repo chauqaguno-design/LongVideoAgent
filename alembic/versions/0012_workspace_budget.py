@@ -1,7 +1,7 @@
 """Create the workspace spending ledger."""
 
 from alembic import op
-from dovideo.infrastructure.persistence.workspace_budget_table import define_v1
+from cutsieve.infrastructure.persistence.workspace_budget_table import define_v1
 
 revision = "0012_workspace_budget"
 down_revision = "0010_shared_outbox"

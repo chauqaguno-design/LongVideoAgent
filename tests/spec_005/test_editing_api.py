@@ -7,12 +7,12 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from dovideo.presentation.api.app import create_app
+from cutsieve.presentation.api.app import create_app
 
 
 @pytest.mark.real_media
 def test_edit_upload_and_render_job(tmp_path):
-    ffmpeg = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("Real editing API integration needs FFmpeg")
     video = tmp_path / "source.mp4"

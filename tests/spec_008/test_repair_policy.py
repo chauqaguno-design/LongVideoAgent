@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from dovideo.application.workflow_review import repair_for
-from dovideo.application.workflow_state import DEFAULT_BUDGET, new_state
+from cutsieve.application.workflow_review import repair_for
+from cutsieve.application.workflow_state import DEFAULT_BUDGET, new_state
 
 
 @pytest.mark.parametrize("problem", ["limit", "uncertain", "budget", "rejected", "wrong_duration"])

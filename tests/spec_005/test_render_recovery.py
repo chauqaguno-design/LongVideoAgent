@@ -10,13 +10,13 @@ import sys
 import pytest
 from sqlalchemy import func, select
 
-from dovideo.application.edit_sources import EditSources
-from dovideo.application.edit_timeline import uid
-from dovideo.infrastructure.persistence.edit_repository import EditRepository, job_view
-from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES, artifacts, jobs
-from dovideo.infrastructure.persistence.render_worker import RenderWorker
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.application.edit_timeline import uid
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository, job_view
+from cutsieve.infrastructure.persistence.edit_tables import EDIT_TABLES, artifacts, jobs
+from cutsieve.infrastructure.persistence.render_worker import RenderWorker
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
 
 
 def repository(root):
@@ -44,7 +44,7 @@ def crash_during_commit(root):
 
 @pytest.mark.real_media
 def test_restart_publishes_only_one_verified_artifact_set(tmp_path):
-    ffmpeg = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("Real recovery integration needs FFmpeg")
     path = tmp_path / "bars.mp4"

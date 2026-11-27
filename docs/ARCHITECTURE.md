@@ -1,6 +1,6 @@
-# ReelCue 架构
+# CutSieve 架构
 
-ReelCue 是本地优先的视频检索与剪辑工作台。Vue 3 和 Vite 提供界面，FastAPI 提供 HTTP API。本地模式运行一个 API 进程，由它启动素材处理、工作流、渲染和事件投递循环。
+CutSieve 是本地优先的视频检索与剪辑工作台。Vue 3 和 Vite 提供界面，FastAPI 提供 HTTP API。本地模式运行一个 API 进程，由它启动素材处理、工作流、渲染和事件投递循环。
 
 ## 存储与检索
 

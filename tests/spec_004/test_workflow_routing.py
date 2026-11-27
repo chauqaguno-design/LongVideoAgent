@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from dovideo.application.workflow_routing import (
+from cutsieve.application.workflow_routing import (
     candidate_reference,
     explicit_route,
     flash_route,

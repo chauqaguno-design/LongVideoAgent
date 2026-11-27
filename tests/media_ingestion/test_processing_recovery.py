@@ -9,17 +9,17 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import update
-from dovideo.application.edit_sources import EditSources
-from dovideo.infrastructure.media.source_artifacts import digest_file
-from dovideo.infrastructure.persistence.processing_catalog import StaleAttempt
-from dovideo.infrastructure.persistence.processing_tables import records, runs
-from dovideo.infrastructure.persistence.processing_worker import ProcessingWorker
-from dovideo.infrastructure.persistence.outbox_tables import inbox, outbox
-from dovideo.infrastructure.persistence.edit_repository import EditRepository
-from dovideo.infrastructure.persistence.workflow_tables import runs as workflow_runs
-from dovideo.infrastructure.persistence.work_outbox import WorkOutbox
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.infrastructure.media.source_artifacts import digest_file
+from cutsieve.infrastructure.persistence.processing_catalog import StaleAttempt
+from cutsieve.infrastructure.persistence.processing_tables import records, runs
+from cutsieve.infrastructure.persistence.processing_worker import ProcessingWorker
+from cutsieve.infrastructure.persistence.outbox_tables import inbox, outbox
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository
+from cutsieve.infrastructure.persistence.workflow_tables import runs as workflow_runs
+from cutsieve.infrastructure.persistence.work_outbox import WorkOutbox
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
 
 
 def worker_at(root):
@@ -52,10 +52,10 @@ def crash(root, point):
 @pytest.mark.real_media
 @pytest.mark.parametrize("point", ["before-frame-commit", "after-frame-commit"])
 def test_committed_frame_survives_crash_and_late_output_is_fenced(tmp_path, monkeypatch, point):
-    exe = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    exe = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not exe:
         pytest.skip("FFmpeg required")
-    monkeypatch.delenv("DOVIDEO_PADDLE_OCR_DIR", raising=False)
+    monkeypatch.delenv("CUTSIEVE_PADDLE_OCR_DIR", raising=False)
     path = tmp_path / "sample.mp4"
     subprocess.run(
         [

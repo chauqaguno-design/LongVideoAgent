@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from dovideo.presentation.api.app import create_app
+from cutsieve.presentation.api.app import create_app
 
 
 def json_body(response):
@@ -156,10 +156,10 @@ def exercise_controls(client, resources):
 
 @pytest.mark.real_media
 def test_two_workspaces_share_pixels_and_request_keys_but_only_read_their_results(tmp_path, monkeypatch):
-    ffmpeg = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
+    monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
     with TestClient(create_app(work_dir=tmp_path / "app")) as client:
         one, two = (prepare_workspace(client, tmp_path, ffmpeg, name) for name in ("first_editor", "second_editor"))
         for own, foreign in ((one, two), (two, one)):

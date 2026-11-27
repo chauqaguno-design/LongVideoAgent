@@ -7,7 +7,7 @@ import subprocess
 import pytest
 from fastapi.testclient import TestClient
 
-from dovideo.presentation.api.app import create_app
+from cutsieve.presentation.api.app import create_app
 
 
 def sign_in(client, name, *, register=False):
@@ -21,7 +21,7 @@ def sign_in(client, name, *, register=False):
 
 @pytest.mark.real_media
 def test_same_name_versions_and_reopening_project(tmp_path):
-    ffmpeg = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required for real source version test")
     work = tmp_path / "app"
@@ -80,6 +80,6 @@ def test_upload_validates_format_and_actual_bytes(tmp_path):
         result = client.post(url + "/complete", json=dict(parts=[dict(part_number=1, etag=etag)],
                                                            idempotency_key="malformed-source"))
         # ffprobe may be absent on a developer machine.
-        assert result.status_code == (422 if shutil.which("ffprobe", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
-                                      or os.getenv("DOVIDEO_FFPROBE") else 503)
+        assert result.status_code == (422 if shutil.which("ffprobe", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
+                                      or os.getenv("CUTSIEVE_FFPROBE") else 503)
         assert client.get("/v1/assets/" + upload["asset_id"]).json()["source_artifact_id"] is None

@@ -8,13 +8,13 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from dovideo.presentation.api.app import create_app
+from cutsieve.presentation.api.app import create_app
 from scripts.workspace_snapshot import backup, restore
 
 
 @pytest.mark.real_media
 def test_restore_and_render(tmp_path):
-    ffmpeg = shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("Release recovery requires FFmpeg")
     film, subs = tmp_path / "fixture.mp4", tmp_path / "line.srt"

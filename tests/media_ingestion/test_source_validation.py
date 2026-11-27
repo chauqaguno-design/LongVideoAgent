@@ -8,12 +8,12 @@ import subprocess
 from fastapi.testclient import TestClient
 import pytest
 
-from dovideo.presentation.api import create_app
+from cutsieve.presentation.api import create_app
 
 
 @pytest.mark.real_media
 def test_corrupt_video_payload_with_intact_header_is_rejected(tmp_path):
-    ffmpeg = shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("Local FFmpeg required")
     path = tmp_path / "damaged.mp4"

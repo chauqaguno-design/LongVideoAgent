@@ -1,4 +1,4 @@
-"""Back up a stopped local VideoMind workspace, or restore it to a new directory."""
+"""Back up a stopped local CutSieve workspace, or restore it to a new directory."""
 import argparse
 from contextlib import closing
 import hashlib

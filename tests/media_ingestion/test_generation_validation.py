@@ -9,18 +9,18 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, update
 
-from dovideo.infrastructure.media.processing_units import ProcessingUnits
-from dovideo.infrastructure.media.source_artifacts import digest_file
-from dovideo.infrastructure.persistence.processing_tables import records
+from cutsieve.infrastructure.media.processing_units import ProcessingUnits
+from cutsieve.infrastructure.media.source_artifacts import digest_file
+from cutsieve.infrastructure.persistence.processing_tables import records
 from test_processing_recovery import worker_at
 
 
 @pytest.mark.real_media
 def test_readback_rejects_missing_artifacts_and_wrong_revision(tmp_path, monkeypatch):
-    exe = shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    exe = shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not exe:
         pytest.skip("FFmpeg required")
-    monkeypatch.delenv("DOVIDEO_PADDLE_OCR_DIR", raising=False)
+    monkeypatch.delenv("CUTSIEVE_PADDLE_OCR_DIR", raising=False)
     path = tmp_path / "small.mp4"
     subprocess.run(
         [exe, "-v", "error", "-f", "lavfi", "-i", "color=s=64x48:r=8:d=1", "-c:v", "libx264", str(path)],

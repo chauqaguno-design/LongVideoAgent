@@ -9,20 +9,20 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 
-from dovideo.application.edit_sources import EditSources
-from dovideo.infrastructure.media.source_artifacts import digest_file
-from dovideo.infrastructure.persistence.edit_repository import EditRepository
-from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES, jobs
-from dovideo.infrastructure.persistence.outbox_tables import outbox
-from dovideo.infrastructure.persistence.processing_tables import records, runs
-from dovideo.infrastructure.persistence.processing_worker import ProcessingWorker
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.infrastructure.media.source_artifacts import digest_file
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository
+from cutsieve.infrastructure.persistence.edit_tables import EDIT_TABLES, jobs
+from cutsieve.infrastructure.persistence.outbox_tables import outbox
+from cutsieve.infrastructure.persistence.processing_tables import records, runs
+from cutsieve.infrastructure.persistence.processing_worker import ProcessingWorker
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base
 
 
 @pytest.mark.real_media
 def test_delete_fences_dependent_jobs_and_preserves_shared_source(tmp_path):
-    exe = shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    exe = shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not exe:
         pytest.skip("FFmpeg required")
     path = tmp_path / "clip.mp4"

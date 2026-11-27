@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from dovideo.presentation.api.app import create_app
+from cutsieve.presentation.api.app import create_app
 
 
 def post(client, path, **body):
@@ -51,7 +51,7 @@ def wait(client, run_id, status="SUCCEEDED"):
 
 @pytest.fixture
 def source(tmp_path):
-    ffmpeg = shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
     captions = tmp_path / "quote.srt"
@@ -88,7 +88,7 @@ def source(tmp_path):
 
 @pytest.mark.real_media
 def test_find_second_occurrence_preview_extend_export_and_restore(tmp_path, monkeypatch, source):
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
+    monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
     folder = tmp_path / "app"
     with TestClient(create_app(work_dir=folder)) as client:
         login(client, "ticket_editor")
@@ -212,7 +212,7 @@ def test_find_second_occurrence_preview_extend_export_and_restore(tmp_path, monk
 
 @pytest.mark.real_media
 def test_conversation_rehydrates_the_original_index_after_reprocessing(tmp_path, source):
-    from dovideo.application.workflow_tools import read_tool
+    from cutsieve.application.workflow_tools import read_tool
 
     with TestClient(create_app(work_dir=tmp_path / "app")) as client:
         login(client, "pinned_context")

@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
-from dovideo.presentation.api import create_app
+from cutsieve.presentation.api import create_app
 
 
 @pytest.fixture
@@ -60,15 +60,15 @@ def test_registration_login_and_revocation(client):
 
 def test_capabilities_uses_local_defaults_and_environment(client, monkeypatch):
     for key in tuple(os.environ):
-        if key.startswith("DOVIDEO_MODEL") or key in ("DOVIDEO_BASE_URL", "DOVIDEO_DEEPSEEK_BASE_URL"):
+        if key.startswith("CUTSIEVE_MODEL") or key in ("CUTSIEVE_BASE_URL", "CUTSIEVE_DEEPSEEK_BASE_URL"):
             monkeypatch.delenv(key)
     assert client.get("/v1/capabilities").status_code == 401
     headers = auth_headers(client)
     local = client.get("/v1/capabilities", headers=headers).json()
     assert not any(local[key] for key in ("text", "vision", "native_tools", "structured_json"))
 
-    monkeypatch.setenv("DOVIDEO_MODEL_BASE_URL", "http://127.0.0.1:8000/v1")
-    monkeypatch.setenv("DOVIDEO_MODEL_MODEL", "local-vlm")
+    monkeypatch.setenv("CUTSIEVE_MODEL_BASE_URL", "http://127.0.0.1:8000/v1")
+    monkeypatch.setenv("CUTSIEVE_MODEL_MODEL", "local-vlm")
     configured = client.get("/v1/capabilities", headers=headers).json()
     assert configured["resolved_model_version"] == "local-vlm"
     assert configured["text"] and configured["vision"] and configured["structured_json"]

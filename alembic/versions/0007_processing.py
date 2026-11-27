@@ -1,7 +1,7 @@
 """Durable media processing runs, coverage and evidence records."""
 
 from alembic import op
-from dovideo.infrastructure.persistence.processing_tables import define_v1
+from cutsieve.infrastructure.persistence.processing_tables import define_v1
 
 revision = "0007_processing"
 down_revision = "0006_edit_timeline"

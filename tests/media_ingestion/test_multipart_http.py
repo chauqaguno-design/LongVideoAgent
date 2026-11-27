@@ -8,13 +8,13 @@ import subprocess
 import pytest
 from fastapi.testclient import TestClient
 
-from dovideo.infrastructure import upload_parts
-from dovideo.presentation.api.app import create_app
+from cutsieve.infrastructure import upload_parts
+from cutsieve.presentation.api.app import create_app
 
 
 @pytest.mark.real_media
 def test_resume_after_restart(tmp_path, monkeypatch):
-    ffmpeg = shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
     monkeypatch.setattr(upload_parts, "part_size", lambda total: 1024)

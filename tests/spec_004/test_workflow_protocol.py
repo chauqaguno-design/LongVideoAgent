@@ -1,12 +1,12 @@
 import json
 import pytest
-from dovideo.application.spec_contracts import tool_catalog
-from dovideo.infrastructure.providers.workflow_flash import decode_turn
+from cutsieve.application.spec_contracts import tool_catalog
+from cutsieve.infrastructure.providers.workflow_flash import decode_turn
 
 
 def test_checkpoint_requires_all_four_sections_on_resume(make_checkpoint):
     from pydantic import ValidationError
-    from dovideo.application.workflow_checkpoint import Checkpoint
+    from cutsieve.application.workflow_checkpoint import Checkpoint
 
     cp = make_checkpoint()
     cp.attempt.plan_generation = cp.repair.repair_count = 1
@@ -51,9 +51,9 @@ def test_two_native_calls_and_json_tool_paths():
 
 
 def test_compaction_preserves_constraints_and_pairs_but_drops_injected_dialogue(make_checkpoint):
-    from dovideo.application.edit_timeline import uid
-    from dovideo.application.workflow_context import compact_dialogs
-    from dovideo.application.workflow_state import NeedsInput
+    from cutsieve.application.edit_timeline import uid
+    from cutsieve.application.workflow_context import compact_dialogs
+    from cutsieve.application.workflow_state import NeedsInput
 
     real, fake, revision = uid(), uid(), uid()
     initial = [

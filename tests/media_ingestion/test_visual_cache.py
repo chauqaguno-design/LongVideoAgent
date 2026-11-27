@@ -8,19 +8,19 @@ from uuid import uuid4
 
 import pytest
 
-from dovideo.infrastructure.media import (
+from cutsieve.infrastructure.media import (
     processing_units as units,
     visual_observations as visual,
 )
-from dovideo.infrastructure.media.source_artifacts import digest_file
-from dovideo.infrastructure.persistence.workspace_budget_table import workspace_budgets
-from dovideo.infrastructure.providers.config import ProviderConfig
+from cutsieve.infrastructure.media.source_artifacts import digest_file
+from cutsieve.infrastructure.persistence.workspace_budget_table import workspace_budgets
+from cutsieve.infrastructure.providers.config import ProviderConfig
 from test_processing_recovery import worker_at
 
 
 @pytest.mark.real_media
 def test_visual_cache_rebinds_frames_and_invalidates_only_affected_stage(tmp_path, monkeypatch):
-    exe = shutil.which("ffmpeg", path=os.environ.get("DOVIDEO_FFMPEG_DIR"))
+    exe = shutil.which("ffmpeg", path=os.environ.get("CUTSIEVE_FFMPEG_DIR"))
     if not exe:
         pytest.skip("FFmpeg required")
     worker = worker_at(tmp_path)
@@ -37,14 +37,14 @@ def test_visual_cache_rebinds_frames_and_invalidates_only_affected_stage(tmp_pat
         lambda env: visual.VisualDeployment(config, "test-v1", True),
     )
     for k in (
-        "DOVIDEO_MEDIA_VISUAL_MAX_CNY_MICROUNITS",
-        "DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS",
+        "CUTSIEVE_MEDIA_VISUAL_MAX_CNY_MICROUNITS",
+        "CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS",
     ):
         monkeypatch.setenv(k, "100000")
-    monkeypatch.setenv("DOVIDEO_FLASH_PRICE_VERSION", "test")
+    monkeypatch.setenv("CUTSIEVE_FLASH_PRICE_VERSION", "test")
     for k in (
-        "DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION",
-        "DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION",
+        "CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION",
+        "CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION",
     ):
         monkeypatch.setenv(k, "1000")
     calls = []
@@ -142,7 +142,7 @@ def test_visual_cache_rebinds_frames_and_invalidates_only_affected_stage(tmp_pat
     assert set(original["response"][0]["frames"]) == set(original["frame_aliases"].values())
     cache_dir = catalog.root / first.id / "cache"
     cache_times = {f: f.stat().st_mtime_ns for f in cache_dir.glob("*.json")}
-    if os.environ.get("DOVIDEO_WHISPER_DIR"):
+    if os.environ.get("CUTSIEVE_WHISPER_DIR"):
         assert cache_times
     replay, artifact = build(first, "unchanged", 0)
     assert (

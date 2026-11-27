@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dovideo-python"
+name = "cutsieve"
 version = "0.1.0"
-description = "ReelCue video search and editing with timestamped evidence"
+description = "CutSieve video search and editing with timestamped evidence"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/chauqaguno-design/ReelCue"
+Repository = "https://github.com/chauqaguno-design/CutSieve"
 
 [project.optional-dependencies]
 search-index = ["qdrant-client>=1.15,<2"]
@@ -34,12 +34,12 @@ test = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-dovideo = ["harness_skills/*.json", "harness_skills/*.md"]
+cutsieve = ["harness_skills/*.json", "harness_skills/*.md"]
 
 [tool.setuptools.data-files]
-"share/videomind" = ["alembic.ini"]
-"share/videomind/alembic" = ["alembic/env.py", "alembic/script.py.mako"]
-"share/videomind/alembic/versions" = ["alembic/versions/*.py"]
+"share/cutsieve" = ["alembic.ini"]
+"share/cutsieve/alembic" = ["alembic/env.py", "alembic/script.py.mako"]
+"share/cutsieve/alembic/versions" = ["alembic/versions/*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

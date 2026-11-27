@@ -7,10 +7,10 @@ import { chromium } from 'playwright-core'
 
 // Run against an isolated application database. Each run creates a test user and project.
 test('upload, trim two ranges, preview, reorder and export a pinned version', { timeout: 180000 }, async t => {
-  const file = process.env.VIDEOMIND_EDIT_SAMPLE
-  assert.ok(file, 'Set VIDEOMIND_EDIT_SAMPLE to a video at least four seconds long.')
+  const file = process.env.CUTSIEVE_EDIT_SAMPLE
+  assert.ok(file, 'Set CUTSIEVE_EDIT_SAMPLE to a video at least four seconds long.')
   await access(file)
-  const base = process.env.VIDEOMIND_EDIT_UI || 'http://127.0.0.1:5175'
+  const base = process.env.CUTSIEVE_EDIT_UI || 'http://127.0.0.1:5175'
   assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(base).hostname), 'Use an isolated local application.')
   const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
     ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
@@ -34,14 +34,14 @@ test('upload, trim two ranges, preview, reorder and export a pinned version', { 
     await video.evaluate(node => node.pause())
   }
   const completed = profile => page.getByText(profile + ' · 已完成', { exact: true }).waitFor({ timeout: 60000 })
-  const output = process.env.VIDEOMIND_EDIT_EVIDENCE
+  const output = process.env.CUTSIEVE_EDIT_EVIDENCE
   let stage = '登录'
   try {
     await page.goto(base)
     await page.locator('.navbar').getByRole('button', { name: '登录 / 注册' }).click()
     await button('去注册').click()
-    await page.getByLabel('用户名', { exact: true }).fill(process.env.VIDEOMIND_EDIT_TEST_USER || 'edit_' + randomUUID().slice(0, 8))
-    await page.getByLabel('密码', { exact: true }).fill(process.env.VIDEOMIND_EDIT_TEST_PASSWORD || randomUUID())
+    await page.getByLabel('用户名', { exact: true }).fill(process.env.CUTSIEVE_EDIT_TEST_USER || 'edit_' + randomUUID().slice(0, 8))
+    await page.getByLabel('密码', { exact: true }).fill(process.env.CUTSIEVE_EDIT_TEST_PASSWORD || randomUUID())
     await page.getByLabel('昵称', { exact: true }).fill('剪辑验收')
     await button('提交注册').click()
     await button('立即登录').click()

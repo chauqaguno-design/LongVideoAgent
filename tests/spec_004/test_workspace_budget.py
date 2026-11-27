@@ -10,18 +10,18 @@ from threading import Barrier
 
 import pytest
 from sqlalchemy import select, update
-from dovideo.application.edit_instructions import PROFILE
-from dovideo.application.edit_sources import EditSources
-from dovideo.application.edit_timeline import EditError, uid
-from dovideo.application.workflow_state import DEFAULT_BUDGET, NeedsInput
-from dovideo.infrastructure.persistence.edit_repository import EditRepository
-from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES, revisions
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
-from dovideo.infrastructure.persistence.workflow_budget import run_model
-from dovideo.infrastructure.persistence.workflow_repository import StaleLease, WorkflowRepository
-from dovideo.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES, model_requests
-from dovideo.infrastructure.persistence.workspace_budget_table import workspace_budgets
+from cutsieve.application.edit_instructions import PROFILE
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.application.edit_timeline import EditError, uid
+from cutsieve.application.workflow_state import DEFAULT_BUDGET, NeedsInput
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository
+from cutsieve.infrastructure.persistence.edit_tables import EDIT_TABLES, revisions
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
+from cutsieve.infrastructure.persistence.workflow_budget import run_model
+from cutsieve.infrastructure.persistence.workflow_repository import StaleLease, WorkflowRepository
+from cutsieve.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES, model_requests
+from cutsieve.infrastructure.persistence.workspace_budget_table import workspace_budgets
 
 
 @pytest.fixture
@@ -119,11 +119,11 @@ def test_two_runs_share_workspace_cap(store):
         claims.append(claim)
     gate = Barrier(2)
     limits = dict(
-        DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="2",
-        DOVIDEO_FLASH_PRICE_VERSION="fixture",
-        DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="1000",
-        DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="0",
-        DOVIDEO_WORKFLOW_STAGE_MAX_MODEL_CALLS="1",
+        CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="2",
+        CUTSIEVE_FLASH_PRICE_VERSION="fixture",
+        CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="1000",
+        CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="0",
+        CUTSIEVE_WORKFLOW_STAGE_MAX_MODEL_CALLS="1",
     )
 
     def spend(claim):
@@ -148,7 +148,7 @@ def test_two_runs_share_workspace_cap(store):
             "next",
             [],
             [],
-            dict(limits, DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="20"),
+            dict(limits, CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="20"),
             lambda: pytest.fail("exceeded stage budget"),
         )
     with repo.sessions() as db:
@@ -227,7 +227,7 @@ def test_fenced_patch_reads_scoped_workflow_proof_in_its_own_transaction(store):
 
 
 def workflow_crash_child():
-    from dovideo.infrastructure.persistence.work_outbox import WorkOutbox
+    from cutsieve.infrastructure.persistence.work_outbox import WorkOutbox
 
     engine = create_sqlalchemy_engine(os.environ["VM_FAULT_DB"])
     repository = WorkflowRepository(EditRepository(EditSources(engine, Path(os.environ["VM_FAULT_DIR"]))))
@@ -250,10 +250,10 @@ def workflow_crash_child():
 
 
 def test_workflow_restart_after_lost_notifications(store, tmp_path, monkeypatch):
-    from dovideo.infrastructure.persistence.workflow_repository import StaleLease
-    from dovideo.infrastructure.persistence.outbox_tables import outbox
-    from dovideo.infrastructure.persistence.work_outbox import WorkOutbox
-    from dovideo.infrastructure.persistence.workflow_tables import runs
+    from cutsieve.infrastructure.persistence.workflow_repository import StaleLease
+    from cutsieve.infrastructure.persistence.outbox_tables import outbox
+    from cutsieve.infrastructure.persistence.work_outbox import WorkOutbox
+    from cutsieve.infrastructure.persistence.workflow_tables import runs
 
     repo = store
     workspace = uid()

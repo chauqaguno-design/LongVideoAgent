@@ -6,9 +6,9 @@ from threading import Event
 
 from PIL import Image
 import pytest
-from dovideo.application.media_sampling import frame_quotas
-from dovideo.infrastructure.edit_media import probe_media
-from dovideo.infrastructure.media.source_artifacts import SourceReader
+from cutsieve.application.media_sampling import frame_quotas
+from cutsieve.infrastructure.edit_media import probe_media
+from cutsieve.infrastructure.media.source_artifacts import SourceReader
 
 
 def test_fair_budget_keeps_tail_when_media_is_longer_than_budget():
@@ -21,8 +21,8 @@ def test_fair_budget_keeps_tail_when_media_is_longer_than_budget():
 @pytest.mark.real_media
 def test_source_frame_matches_pts_for_vfr_nonzero_origin(tmp_path):
     tools = {
-        name: os.getenv("DOVIDEO_" + name.upper())
-        or shutil.which(name, path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+        name: os.getenv("CUTSIEVE_" + name.upper())
+        or shutil.which(name, path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
         for name in ("ffmpeg", "ffprobe")
     }
     if not all(tools.values()):
@@ -63,7 +63,7 @@ def test_source_frame_matches_pts_for_vfr_nonzero_origin(tmp_path):
 @pytest.mark.real_media
 def test_reordered_sparse_h264_brackets_each_requested_frame(tmp_path):
     tools = {
-        n: os.getenv("DOVIDEO_" + n.upper()) or shutil.which(n, path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+        n: os.getenv("CUTSIEVE_" + n.upper()) or shutil.which(n, path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
         for n in ("ffmpeg", "ffprobe")
     }
     if not all(tools.values()):
@@ -101,7 +101,7 @@ def test_reordered_sparse_h264_brackets_each_requested_frame(tmp_path):
 
 @pytest.mark.real_media
 def test_frame_uses_the_original_display_rotation(tmp_path):
-    tools = {n: shutil.which(n, path=os.getenv("DOVIDEO_FFMPEG_DIR")) for n in ("ffmpeg", "ffprobe")}
+    tools = {n: shutil.which(n, path=os.getenv("CUTSIEVE_FFMPEG_DIR")) for n in ("ffmpeg", "ffprobe")}
     if not all(tools.values()):
         pytest.skip("FFmpeg required")
     original = tmp_path / "unrotated.mp4"

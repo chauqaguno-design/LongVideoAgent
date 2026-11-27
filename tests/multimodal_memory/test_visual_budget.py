@@ -7,38 +7,38 @@ from PIL import Image
 import pytest
 from sqlalchemy import create_engine, select
 
-from dovideo.application.edit_sources import EditSources
-from dovideo.infrastructure.media import visual_observations as visual
-from dovideo.infrastructure.persistence.media_visual_budget import billed_window
-from dovideo.infrastructure.persistence.processing_catalog import MediaCatalog
-from dovideo.infrastructure.persistence.processing_tables import records, runs
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
-from dovideo.infrastructure.persistence.workspace_budget_table import workspace_budgets
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.infrastructure.media import visual_observations as visual
+from cutsieve.infrastructure.persistence.media_visual_budget import billed_window
+from cutsieve.infrastructure.persistence.processing_catalog import MediaCatalog
+from cutsieve.infrastructure.persistence.processing_tables import records, runs
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base
+from cutsieve.infrastructure.persistence.workspace_budget_table import workspace_budgets
 
 
 def test_configured_deployment_opt_in_and_settlement(tmp_path, monkeypatch):
     assert visual.visual_deployment({}) is None
-    assert visual.visual_deployment(dict(DOVIDEO_LOCAL_FLASH_INFERENCE="1")) is None
-    local = dict(DOVIDEO_LOCAL_FLASH_INFERENCE="1", DOVIDEO_MODEL_BASE_URL="http://127.0.0.1:8000/v1")
+    assert visual.visual_deployment(dict(CUTSIEVE_LOCAL_FLASH_INFERENCE="1")) is None
+    local = dict(CUTSIEVE_LOCAL_FLASH_INFERENCE="1", CUTSIEVE_MODEL_BASE_URL="http://127.0.0.1:8000/v1")
     assert not visual.visual_deployment(local).billed
     cfg = dict(
-        DOVIDEO_MODEL_BASE_URL="https://offline.example/v1",
-        DOVIDEO_MODEL_MODEL="deepseek-flash",
-        DOVIDEO_MODEL_VERSION="deepseek-flash-test",
-        DOVIDEO_MODEL_API_KEY="fixture",
-        DOVIDEO_MEDIA_REMOTE_FLASH="1",
-        DOVIDEO_MEDIA_VISUAL_MAX_CNY_MICROUNITS="100",
-        DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="100",
-        DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="1000",
-        DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="1000",
-        DOVIDEO_FLASH_PRICE_VERSION="fixture",
+        CUTSIEVE_MODEL_BASE_URL="https://offline.example/v1",
+        CUTSIEVE_MODEL_MODEL="deepseek-flash",
+        CUTSIEVE_MODEL_VERSION="deepseek-flash-test",
+        CUTSIEVE_MODEL_API_KEY="fixture",
+        CUTSIEVE_MEDIA_REMOTE_FLASH="1",
+        CUTSIEVE_MEDIA_VISUAL_MAX_CNY_MICROUNITS="100",
+        CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="100",
+        CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="1000",
+        CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="1000",
+        CUTSIEVE_FLASH_PRICE_VERSION="fixture",
     )
     deployment = visual.visual_deployment(cfg)
     assert deployment.billed and deployment.model == "deepseek-flash-test"
-    assert visual.visual_deployment(dict(cfg, DOVIDEO_MODEL_VISION="0")) is None
-    assert visual.visual_deployment(dict(cfg, DOVIDEO_MODEL_API_KEY="")) is None
-    assert visual.visual_deployment(dict(cfg, DOVIDEO_MODEL_BASE_URL="http://offline.example/v1")) is None
+    assert visual.visual_deployment(dict(cfg, CUTSIEVE_MODEL_VISION="0")) is None
+    assert visual.visual_deployment(dict(cfg, CUTSIEVE_MODEL_API_KEY="")) is None
+    assert visual.visual_deployment(dict(cfg, CUTSIEVE_MODEL_BASE_URL="http://offline.example/v1")) is None
     db = create_engine(f"sqlite:///{tmp_path/'budget.sqlite3'}")
     Base.metadata.create_all(db, tables=[projects, sources, runs, records, workspace_budgets])
     catalog = MediaCatalog(EditSources(db, tmp_path))
@@ -79,7 +79,7 @@ def test_configured_deployment_opt_in_and_settlement(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="已经发起"):
         observe("first", cfg)
     with pytest.raises(ValueError, match="超过可用预算"):
-        observe("second", dict(cfg, DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="1"))
+        observe("second", dict(cfg, CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="1"))
     assert len(calls) == 1
 
     responses = iter([dict(response, choices=[dict(message=dict(content="invalid"))]), response])

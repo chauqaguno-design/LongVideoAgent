@@ -7,19 +7,19 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import create_engine, select, update
 
-from dovideo.application.edit_sources import EditSources
-from dovideo.application.edit_timeline import EditError, uid
-from dovideo.application.stages import StageDeps
-from dovideo.application.stages.edit import run_edit
-from dovideo.application.stages.plan import model_plan
-from dovideo.application.workflow_checkpoint import ModelIdentity, PlanAttempt
-from dovideo.infrastructure.persistence.edit_repository import EditRepository
-from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
-from dovideo.infrastructure.persistence.workflow_repository import StaleLease, WorkflowRepository
-from dovideo.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES, runs
-from dovideo.infrastructure.persistence.workflow_worker import WorkflowWorker
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.application.edit_timeline import EditError, uid
+from cutsieve.application.stages import StageDeps
+from cutsieve.application.stages.edit import run_edit
+from cutsieve.application.stages.plan import model_plan
+from cutsieve.application.workflow_checkpoint import ModelIdentity, PlanAttempt
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository
+from cutsieve.infrastructure.persistence.edit_tables import EDIT_TABLES
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base
+from cutsieve.infrastructure.persistence.workflow_repository import StaleLease, WorkflowRepository
+from cutsieve.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES, runs
+from cutsieve.infrastructure.persistence.workflow_worker import WorkflowWorker
 
 
 @pytest.fixture
@@ -94,18 +94,18 @@ def test_invalid_reference_rolls_back_before_checkpoint_publication(setup):
 
 
 def test_input_identity_and_phase_budget_survive_new_plan_and_worker(setup, monkeypatch):
-    from dovideo.application.workflow_state import DEFAULT_BUDGET, NeedsInput
-    from dovideo.infrastructure.persistence.workflow_budget import run_model
-    from dovideo.infrastructure.persistence.workflow_tables import model_requests
+    from cutsieve.application.workflow_state import DEFAULT_BUDGET, NeedsInput
+    from cutsieve.infrastructure.persistence.workflow_budget import run_model
+    from cutsieve.infrastructure.persistence.workflow_tables import model_requests
 
     repo, workspace, body = setup
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_STAGE_MAX_MODEL_CALLS", "1")
+    monkeypatch.setenv("CUTSIEVE_WORKFLOW_STAGE_MAX_MODEL_CALLS", "1")
     repo.create(workspace, dict(body, budget=dict(DEFAULT_BUDGET, max_cost_microunits=1000)))
     env = dict(
-        DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000",
-        DOVIDEO_FLASH_PRICE_VERSION="fixture",
-        DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="25",
-        DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="25",
+        CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000",
+        CUTSIEVE_FLASH_PRICE_VERSION="fixture",
+        CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="25",
+        CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="25",
     )
     reply = dict(usage=dict(prompt_tokens=12, completion_tokens=3), choices=[])
     old = repo.claim(uid())
@@ -152,7 +152,7 @@ def test_input_identity_and_phase_budget_survive_new_plan_and_worker(setup, monk
 
 
 def test_skills_are_lazy_scoped_and_pinned(setup, monkeypatch):
-    import dovideo.application.workflow_skills as skills
+    import cutsieve.application.workflow_skills as skills
 
     repo, workspace, body = setup
     repo.create(workspace, body)
@@ -188,8 +188,8 @@ def test_skills_are_lazy_scoped_and_pinned(setup, monkeypatch):
 
 
 def test_recovered_plan_persists_fingerprint_without_provider_reasoning(setup):
-    from dovideo.application.workflow_state import DEFAULT_BUDGET, NeedsInput
-    from dovideo.infrastructure.persistence.workflow_tables import model_requests
+    from cutsieve.application.workflow_state import DEFAULT_BUDGET, NeedsInput
+    from cutsieve.infrastructure.persistence.workflow_tables import model_requests
 
     repo, workspace, body = setup
     repo.create(workspace, dict(body, budget=dict(DEFAULT_BUDGET, max_cost_microunits=1000)))
@@ -220,10 +220,10 @@ def test_recovered_plan_persists_fingerprint_without_provider_reasoning(setup):
         identity=lambda: identity,
         request=request,
         env=dict(
-            DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000",
-            DOVIDEO_FLASH_PRICE_VERSION="fixture",
-            DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="20",
-            DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="20",
+            CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000",
+            CUTSIEVE_FLASH_PRICE_VERSION="fixture",
+            CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="20",
+            CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="20",
         ),
     )
     with pytest.raises(NeedsInput, match="Pick a source range"):
@@ -325,8 +325,8 @@ def test_await_resume_budget_and_supersede(setup):
 
 
 def test_paid_attempts_bound_replay_uncertainty_and_images(setup):
-    from dovideo.application.workflow_state import DEFAULT_BUDGET, NeedsInput
-    from dovideo.infrastructure.persistence.workflow_budget import run_model
+    from cutsieve.application.workflow_state import DEFAULT_BUDGET, NeedsInput
+    from cutsieve.infrastructure.persistence.workflow_budget import run_model
 
     repo, w, body = setup
     result = repo.create(
@@ -341,10 +341,10 @@ def test_paid_attempts_bound_replay_uncertainty_and_images(setup):
         }
     ]
     env = {
-        "DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS": "500000",
-        "DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION": "200",
-        "DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION": "1000",
-        "DOVIDEO_FLASH_PRICE_VERSION": "contract-fixture",
+        "CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS": "500000",
+        "CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION": "200",
+        "CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION": "1000",
+        "CUTSIEVE_FLASH_PRICE_VERSION": "contract-fixture",
     }
     with pytest.raises(NeedsInput):
         run_model(repo, claim, "one", image, [], {}, lambda: pytest.fail("unpriced"))
@@ -369,7 +369,7 @@ def test_paid_attempts_bound_replay_uncertainty_and_images(setup):
 
 
 def test_effect_commit_before_ledger_replays_business_receipt(setup):
-    from dovideo.application.edit_instructions import PROFILE
+    from cutsieve.application.edit_instructions import PROFILE
 
     repo, workspace, body = setup
     run = repo.create(workspace, body)
@@ -414,7 +414,7 @@ def test_active_workflow_fenced_on_source_tombstone(setup):
 
 def test_waiting_checkpoint_wakeup_survives_worker_restart(setup):
     import time
-    from dovideo.infrastructure.persistence.work_outbox import WorkOutbox, emit
+    from cutsieve.infrastructure.persistence.work_outbox import WorkOutbox, emit
 
     repo, workspace, body = setup
     run = repo.create(workspace, body)
@@ -445,7 +445,7 @@ def test_waiting_checkpoint_wakeup_survives_worker_restart(setup):
 
 
 def test_read_tools_refuse_resources_outside_frozen_run(setup):
-    from dovideo.application.workflow_tools import read_tool
+    from cutsieve.application.workflow_tools import read_tool
 
     repo, workspace, body = setup
     repo.create(workspace, body)
@@ -465,18 +465,18 @@ def test_read_tools_refuse_resources_outside_frozen_run(setup):
 
 def test_cancel_in_flight_settles_charge_without_accepting_result(setup):
     from threading import Event
-    from dovideo.application.workflow_state import DEFAULT_BUDGET
-    from dovideo.infrastructure.persistence.workflow_budget import run_model
+    from cutsieve.application.workflow_state import DEFAULT_BUDGET
+    from cutsieve.infrastructure.persistence.workflow_budget import run_model
 
     repo, workspace, body = setup
     run = repo.create(workspace, dict(body, budget=dict(DEFAULT_BUDGET, max_cost_microunits=1000)))
     claim = repo.claim(uid())
     started, release = Event(), Event()
     env = dict(
-        DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000",
-        DOVIDEO_FLASH_PRICE_VERSION="test",
-        DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="20",
-        DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="200",
+        CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000",
+        CUTSIEVE_FLASH_PRICE_VERSION="test",
+        CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="20",
+        CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="200",
     )
 
     def provider():
@@ -504,7 +504,7 @@ def test_cancel_in_flight_settles_charge_without_accepting_result(setup):
 
 def test_native_turn_records_each_denial_and_repairs_only_once(setup):
     import json
-    from dovideo.application.workflow_state import DEFAULT_BUDGET
+    from cutsieve.application.workflow_state import DEFAULT_BUDGET
 
     repo, workspace, body = setup
     repo.create(workspace, dict(body, budget=dict(DEFAULT_BUDGET, max_cost_microunits=1000)))
@@ -530,10 +530,10 @@ def test_native_turn_records_each_denial_and_repairs_only_once(setup):
 
     planner = SimpleNamespace(
         env=dict(
-            DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000",
-            DOVIDEO_FLASH_PRICE_VERSION="test",
-            DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="100",
-            DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="100",
+            CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000",
+            CUTSIEVE_FLASH_PRICE_VERSION="test",
+            CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="100",
+            CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="100",
         ),
         identity=lambda: dict(model="fixture", mode="native", fingerprint="fixture"),
         request=request,
@@ -569,7 +569,7 @@ def test_run_deadline_and_bounded_recovery(setup):
 
 
 def test_steering_starts_a_fresh_plan_generation(setup):
-    from dovideo.application.workflow_state import NeedsInput
+    from cutsieve.application.workflow_state import NeedsInput
 
     repo, w, body = setup
     task = repo.create(w, body)
@@ -605,12 +605,12 @@ def test_steering_starts_a_fresh_plan_generation(setup):
 
 
 def test_repair_reuses_source_snapshot_and_replays_committed_patch(setup):
-    from dovideo.application.edit_instructions import PROFILE, brief_for
-    from dovideo.application.workflow_checkpoint import EditBrief
-    from dovideo.application.workflow_review import repair_for
-    from dovideo.application.workflow_shots import candidate
-    from dovideo.application.workflow_state import DEFAULT_BUDGET, NeedsInput
-    from dovideo.infrastructure.persistence.edit_tables import revisions
+    from cutsieve.application.edit_instructions import PROFILE, brief_for
+    from cutsieve.application.workflow_checkpoint import EditBrief
+    from cutsieve.application.workflow_review import repair_for
+    from cutsieve.application.workflow_shots import candidate
+    from cutsieve.application.workflow_state import DEFAULT_BUDGET, NeedsInput
+    from cutsieve.infrastructure.persistence.edit_tables import revisions
 
     repo, workspace, body = setup
     project = body["scope"]["project_id"]
@@ -694,9 +694,9 @@ def test_repair_reuses_source_snapshot_and_replays_committed_patch(setup):
 
 
 def test_budget_resume_keeps_attempt_then_candidate_reply_starts_a_new_one(setup):
-    from dovideo.application.edit_instructions import PROFILE, brief_for
-    from dovideo.application.workflow_checkpoint import EditBrief
-    from dovideo.application.workflow_state import NeedsInput
+    from cutsieve.application.edit_instructions import PROFILE, brief_for
+    from cutsieve.application.workflow_checkpoint import EditBrief
+    from cutsieve.application.workflow_state import NeedsInput
 
     repo, workspace, body = setup
     source = ready_source(repo, workspace, body["scope"]["project_id"], 1_000_000)

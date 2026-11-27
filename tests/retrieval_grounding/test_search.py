@@ -11,11 +11,11 @@ from PIL import Image, ImageDraw
 import pytest
 from sqlalchemy import create_engine
 
-from dovideo.application.edit_sources import EditSources
-from dovideo.application.evidence_search import EvidenceSearch
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.search_tables import artifacts, runs
-from dovideo.presentation.api.search import install_search_routes
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.application.evidence_search import EvidenceSearch
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.search_tables import artifacts, runs
+from cutsieve.presentation.api.search import install_search_routes
 
 
 def uid():
@@ -208,7 +208,7 @@ def test_global_literal_evidence_beyond_top_k_and_unverified_prefix(ctx):
 
 def test_incomplete_encoder_response_preserves_lexical_hits(ctx, monkeypatch):
     from http.client import IncompleteRead
-    from dovideo.infrastructure.search_encoder import SearchEncoder
+    from cutsieve.infrastructure.search_encoder import SearchEncoder
 
     c = ctx
     encoder = SearchEncoder("http://localhost:8174", c.folder)
@@ -227,7 +227,7 @@ def test_incomplete_encoder_response_preserves_lexical_hits(ctx, monkeypatch):
 
 def test_local_artifacts_survive_reopen_and_recheck_scope(ctx):
     from uuid import UUID, uuid5
-    from dovideo.infrastructure.search_artifacts import SearchArtifacts
+    from cutsieve.infrastructure.search_artifacts import SearchArtifacts
 
     c = ctx
     writer = c.service.files
@@ -288,7 +288,7 @@ def test_unchecked_action_is_not_confirmed_by_frame(ctx):
 def test_tombstone_during_encoding_prevents_late_publication(ctx, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
-    from dovideo.infrastructure.search_encoder import SearchEncoder
+    from cutsieve.infrastructure.search_encoder import SearchEncoder
 
     c = ctx
     encoder = SearchEncoder("http://localhost:8174", c.folder / "vectors")
@@ -344,7 +344,7 @@ def test_completed_scan_replays_immutable_artifact_and_rechecks_source_acl(ctx):
 
 
 def test_point_evidence_hits_use_the_intersecting_playable_segment(ctx):
-    from dovideo.application.evidence_search import playback_range
+    from cutsieve.application.evidence_search import playback_range
 
     t = 12_833_333
     row = {"range": {"start_us": t, "end_us": t + 1}, "frame": {"actual_us": t}}

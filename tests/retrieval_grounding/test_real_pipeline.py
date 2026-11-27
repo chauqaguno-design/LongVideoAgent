@@ -9,18 +9,18 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 import pytest
-from dovideo.presentation.api.app import create_app
+from cutsieve.presentation.api.app import create_app
 
 
 @pytest.mark.real_media
 def test_uploaded_source_query_image_grounded_quote_and_delete(tmp_path, monkeypatch):
-    ffmpeg = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("requires FFmpeg")
     for k in (
-        "VIDEOMIND_SEARCH_ENCODER_URL",
-        "DOVIDEO_WHISPER_DIR",
-        "DOVIDEO_PADDLE_OCR_DIR",
+        "CUTSIEVE_SEARCH_ENCODER_URL",
+        "CUTSIEVE_WHISPER_DIR",
+        "CUTSIEVE_PADDLE_OCR_DIR",
     ):
         monkeypatch.delenv(k, raising=False)
     text = tmp_path / "dialogue.srt"

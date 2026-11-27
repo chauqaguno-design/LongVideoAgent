@@ -7,15 +7,15 @@ import { chromium } from 'playwright-core'
 
 // The selected local fixture must contain the supplied dialogue. Uses its own test account.
 test('upload, read notes, seek by dialogue, search by screenshot and ask with evidence', { timeout: 240000 }, async t => {
-  const base = process.env.VIDEOMIND_EDIT_UI || 'http://127.0.0.1:5175'
-  const file = process.env.VIDEOMIND_EDIT_SAMPLE, quote = process.env.VIDEOMIND_TEST_QUOTE
+  const base = process.env.CUTSIEVE_EDIT_UI || 'http://127.0.0.1:5175'
+  const file = process.env.CUTSIEVE_EDIT_SAMPLE, quote = process.env.CUTSIEVE_TEST_QUOTE
   assert.ok(file && quote)
   assert.ok(['127.0.0.1', 'localhost'].includes(new URL(base).hostname))
   const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
     ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : { channel: process.platform === 'win32' ? 'msedge' : undefined })
   t.after(() => browser.close())
   const viewport = { width: 1360, height: 900 }
-  const demo = process.env.VIDEOMIND_DEMO_VIDEO
+  const demo = process.env.CUTSIEVE_DEMO_VIDEO
   const page = await browser.newPage({ viewport, recordVideo: demo ? { dir: path.dirname(demo), size: viewport } : undefined })
   const user = { username: 'journey_' + randomUUID().slice(0, 8), password: randomUUID() }
   const registered = await page.request.post(base + '/user/register', { data: { ...user, nickname: '本地验收' } })
@@ -72,9 +72,9 @@ test('upload, read notes, seek by dialogue, search by screenshot and ask with ev
   await button('查看全部匹配清单').click()
   await page.locator('.workflow-output ol li').first().waitFor()
   await button('检索片段').click()
-  if (process.env.VIDEOMIND_QUERY_IMAGE) {
+  if (process.env.CUTSIEVE_QUERY_IMAGE) {
     await page.getByLabel('台词、动作或场景').fill('')
-    await page.getByLabel('查询截图').setInputFiles(process.env.VIDEOMIND_QUERY_IMAGE)
+    await page.getByLabel('查询截图').setInputFiles(process.env.CUTSIEVE_QUERY_IMAGE)
     const imageHit = await firstHit()
     await page.getByText(/image_spatial|vision_dense/).first().waitFor()
     const [image] = await Promise.all([evidenceResponse(imageHit.evidence_ids[0]), hit.getByRole('button', { name: /回看/ }).click()])
@@ -94,11 +94,11 @@ test('upload, read notes, seek by dialogue, search by screenshot and ask with ev
   assert.equal(page.url(), questionUrl)
   await page.reload()
   await page.locator('.workflow-output').waitFor()
-  if (process.env.VIDEOMIND_EDIT_EVIDENCE) {
-    await mkdir(process.env.VIDEOMIND_EDIT_EVIDENCE, { recursive: true })
-    await page.screenshot({ path: path.join(process.env.VIDEOMIND_EDIT_EVIDENCE, 'grounded-question.png'), fullPage: true })
+  if (process.env.CUTSIEVE_EDIT_EVIDENCE) {
+    await mkdir(process.env.CUTSIEVE_EDIT_EVIDENCE, { recursive: true })
+    await page.screenshot({ path: path.join(process.env.CUTSIEVE_EDIT_EVIDENCE, 'grounded-question.png'), fullPage: true })
   }
-  const editInstruction = process.env.VIDEOMIND_TEST_EDIT || '剪出第 1 到 3 秒并导出'
+  const editInstruction = process.env.CUTSIEVE_TEST_EDIT || '剪出第 1 到 3 秒并导出'
   await page.getByLabel('问题或剪辑要求').fill(editInstruction)
   const exportMetadata = page.waitForResponse(async response =>
     new URL(response.url()).pathname.startsWith('/v1/artifacts/') && response.ok() && (await response.json()).kind === 'EXPORT',
@@ -116,8 +116,8 @@ test('upload, read notes, seek by dialogue, search by screenshot and ask with ev
   assert.equal(downloaded.length, fileMeta.size_bytes)
   assert.equal(sha256, fileMeta.sha256)
   const receipt = { playback, download: { size_bytes: downloaded.length, sha256, revision_id: fileMeta.timeline_revision_id } }
-  if (process.env.VIDEOMIND_TEST_CONFLICT) {
-    await page.getByLabel('问题或剪辑要求').fill(process.env.VIDEOMIND_TEST_CONFLICT)
+  if (process.env.CUTSIEVE_TEST_CONFLICT) {
+    await page.getByLabel('问题或剪辑要求').fill(process.env.CUTSIEVE_TEST_CONFLICT)
     await button('发送').click()
     const clarification = page.getByText(/候选无法拼出目标.*秒/)
     await clarification.waitFor()
@@ -125,7 +125,7 @@ test('upload, read notes, seek by dialogue, search by screenshot and ask with ev
     receipt.conflict = await clarification.innerText()
   }
   t.diagnostic(JSON.stringify(receipt))
-  if (process.env.VIDEOMIND_EDIT_EVIDENCE) await writeFile(path.join(process.env.VIDEOMIND_EDIT_EVIDENCE, 'project-journey.json'), JSON.stringify(receipt, null, 2))
+  if (process.env.CUTSIEVE_EDIT_EVIDENCE) await writeFile(path.join(process.env.CUTSIEVE_EDIT_EVIDENCE, 'project-journey.json'), JSON.stringify(receipt, null, 2))
   if (demo) {
     const recording = page.video()
     await page.close()

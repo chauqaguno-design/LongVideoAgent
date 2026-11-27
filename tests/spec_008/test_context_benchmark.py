@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
-from dovideo.application.workflow_context import compact_dialogs
-from dovideo.application.workflow_identity import context_estimate, digest_json
+from cutsieve.application.workflow_context import compact_dialogs
+from cutsieve.application.workflow_identity import context_estimate, digest_json
 
 
 def test_compaction_baseline_vs_layered_context(make_checkpoint):
@@ -47,7 +47,7 @@ def test_compaction_baseline_vs_layered_context(make_checkpoint):
     assert json.loads(layered[2]["content"])["frozen_inputs"]["brief"] == brief
     full_cost, layered_cost = (context_estimate(dialogs, tools)["input_tokens"] for dialogs in (raw, layered))
     assert layered_cost < full_cost
-    if output := os.getenv("DOVIDEO_HARNESS_DEMO_OUT"):
+    if output := os.getenv("CUTSIEVE_HARNESS_DEMO_OUT"):
         folder = Path(output)
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "context-comparison.json").write_text(

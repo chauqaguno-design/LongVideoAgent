@@ -51,7 +51,7 @@ export function makeCommand() {
 }
 
 export async function uploadAsset(projectId, file, { signal, progress = () => {} } = {}) {
-  const key = 'videomind-upload:' + JSON.stringify([projectId, file.name, file.size, file.lastModified])
+  const key = 'cutsieve-upload:' + JSON.stringify([projectId, file.name, file.size, file.lastModified])
   const saved = JSON.parse(localStorage.getItem(key) || 'null')
   let upload, received = []
   if (saved) {

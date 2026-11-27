@@ -1,8 +1,8 @@
 import pytest
 
-from dovideo.application.edit_instructions import PROFILE
-from dovideo.application.edit_timeline import uid
-from dovideo.application.workflow_checkpoint import (
+from cutsieve.application.edit_instructions import PROFILE
+from cutsieve.application.edit_timeline import uid
+from cutsieve.application.workflow_checkpoint import (
     Checkpoint, ContextManifest, EditBrief, PlanAttempt, RepairHistory, RunSpec,
 )
 

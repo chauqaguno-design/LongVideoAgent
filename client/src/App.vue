@@ -80,7 +80,7 @@ function logout() {
 <template>
   <div class="shell">
     <header class="navbar">
-      <a href="/" aria-label="ReelCue 镜寻剪辑台首页"><strong>ReelCue</strong> 镜寻剪辑台</a>
+      <a href="/" aria-label="CutSieve 剪筛工作台首页"><strong>CutSieve</strong> 剪筛工作台</a>
       <div v-if="user">
         <span>{{ user.nickname }}</span>
         <button @click="logout">退出登录</button>

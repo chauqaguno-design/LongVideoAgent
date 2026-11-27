@@ -1,4 +1,4 @@
-from dovideo.application.media_memory import viewing_notes
+from cutsieve.application.media_memory import viewing_notes
 
 
 def test_repeated_gesture_survives_as_two_instances_with_overlapping_segments():

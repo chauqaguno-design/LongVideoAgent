@@ -1,7 +1,7 @@
 """Durable agent run, receipts, result artifacts."""
 
 from alembic import op
-from dovideo.infrastructure.persistence.workflow_tables import define_v1
+from cutsieve.infrastructure.persistence.workflow_tables import define_v1
 
 revision = "0009_workflows"
 down_revision = "0008_search"

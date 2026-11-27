@@ -3,8 +3,8 @@ from alembic.runtime.migration import MigrationContext
 import pytest
 from sqlalchemy import inspect
 
-from dovideo.infrastructure.persistence.migrations import require_schema_head, upgrade_schema
-from dovideo.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
+from cutsieve.infrastructure.persistence.migrations import require_schema_head, upgrade_schema
+from cutsieve.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
 
 
 @pytest.fixture

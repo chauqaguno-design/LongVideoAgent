@@ -16,22 +16,22 @@ from PIL import Image
 from sqlalchemy import select, update
 import pytest
 
-from dovideo.application.workflow_identity import context_estimate
-from dovideo.application.workflow_state import DEFAULT_BUDGET
-from dovideo.infrastructure.persistence.render_worker import media_binaries
-from dovideo.infrastructure.persistence.workflow_tables import runs
-from dovideo.infrastructure.persistence.workflow_worker import WorkflowWorker
-from dovideo.presentation.api.app import create_app
+from cutsieve.application.workflow_identity import context_estimate
+from cutsieve.application.workflow_state import DEFAULT_BUDGET
+from cutsieve.infrastructure.persistence.render_worker import media_binaries
+from cutsieve.infrastructure.persistence.workflow_tables import runs
+from cutsieve.infrastructure.persistence.workflow_worker import WorkflowWorker
+from cutsieve.presentation.api.app import create_app
 from test_conversation_runs import login, post, upload
 
 
 class ControlledCoverage:
     env = dict(
-        DOVIDEO_WORKFLOW_LIVE_MODEL="1",
-        DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000000",
-        DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="100",
-        DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="100",
-        DOVIDEO_FLASH_PRICE_VERSION="controlled-demo-v1",
+        CUTSIEVE_WORKFLOW_LIVE_MODEL="1",
+        CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="1000000",
+        CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="100",
+        CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="100",
+        CUTSIEVE_FLASH_PRICE_VERSION="controlled-demo-v1",
     )
 
     def identity(self, *, vision=False):
@@ -165,7 +165,7 @@ def drive(app, run_id, directory, *, lose_worker=False):
 @pytest.mark.real_media
 @pytest.mark.parametrize("repair_limit", [0, 2], ids=["no-repair", "bounded-repair"])
 def test_grounded_edit_recovery_repair_and_export(tmp_path, monkeypatch, color_movie, repair_limit):
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_REPAIR_LIMIT", str(repair_limit))
+    monkeypatch.setenv("CUTSIEVE_WORKFLOW_REPAIR_LIMIT", str(repair_limit))
 
     async def manual_start(self):
         pass
@@ -251,7 +251,7 @@ def test_grounded_edit_recovery_repair_and_export(tmp_path, monkeypatch, color_m
             assert output["revision_no"] == 2 and result["repair_count"] == 0
             assert output["clips"][1]["source_start_us"] == 10_000_000
             assert report["semantic_checks"][0]["status"] == "FAILED" and "export_artifact_id" not in result
-        if destination := os.getenv("DOVIDEO_HARNESS_DEMO_OUT"):
+        if destination := os.getenv("CUTSIEVE_HARNESS_DEMO_OUT"):
             folder = Path(destination)
             folder.mkdir(parents=True, exist_ok=True)
             if payload:

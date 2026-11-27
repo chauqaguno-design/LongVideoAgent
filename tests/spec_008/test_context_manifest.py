@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from dovideo.application.edit_timeline import EditError, missing, uid
-from dovideo.application.workflow_context import (
+from cutsieve.application.edit_timeline import EditError, missing, uid
+from cutsieve.application.workflow_context import (
     compact_dialogs,
     read_reference,
     remember_evidence,

@@ -2,8 +2,8 @@ import math
 
 import pytest
 
-from dovideo.application.sparse_retrieval import BM25Retriever
-from dovideo.application.rank_fusion import RankedCandidate, reciprocal_rank_fusion
+from cutsieve.application.sparse_retrieval import BM25Retriever
+from cutsieve.application.rank_fusion import RankedCandidate, reciprocal_rank_fusion
 
 
 def rank(query, docs):

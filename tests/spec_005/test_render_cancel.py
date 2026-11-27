@@ -11,16 +11,16 @@ from fastapi import HTTPException
 import pytest
 from sqlalchemy import create_engine, select
 
-from dovideo.application.edit_sources import EditSources
-from dovideo.application.edit_timeline import uid
-from dovideo.infrastructure.media.source_artifacts import digest_file
-from dovideo.infrastructure.persistence.edit_repository import EditRepository
-from dovideo.infrastructure.persistence.edit_tables import artifacts, EDIT_TABLES, jobs
-from dovideo.infrastructure.persistence.processing_tables import records, runs
-from dovideo.infrastructure.persistence.processing_worker import ProcessingWorker
-from dovideo.infrastructure.persistence.render_worker import RenderWorker
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.application.edit_timeline import uid
+from cutsieve.infrastructure.media.source_artifacts import digest_file
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository
+from cutsieve.infrastructure.persistence.edit_tables import artifacts, EDIT_TABLES, jobs
+from cutsieve.infrastructure.persistence.processing_tables import records, runs
+from cutsieve.infrastructure.persistence.processing_worker import ProcessingWorker
+from cutsieve.infrastructure.persistence.render_worker import RenderWorker
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base
 
 
 @pytest.mark.real_media
@@ -31,7 +31,7 @@ from dovideo.infrastructure.persistence.sqlalchemy import Base
 async def test_real_render_process_stops_and_releases_its_attempt(
     tmp_path, monkeypatch, action, phase, record_property
 ):
-    exe = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    exe = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not exe:
         pytest.skip("FFmpeg required")
     path = tmp_path / "sample.mp4"
@@ -152,10 +152,10 @@ async def test_real_render_process_stops_and_releases_its_attempt(
 @pytest.mark.real_media
 @pytest.mark.asyncio
 async def test_real_ffprobe_exits_on_stop(monkeypatch, record_property):
-    from dovideo.infrastructure.edit_media import _run
-    from dovideo.infrastructure.media.process import MediaStopped
+    from cutsieve.infrastructure.edit_media import _run
+    from cutsieve.infrastructure.media.process import MediaStopped
 
-    ffprobe = os.getenv("DOVIDEO_FFPROBE") or shutil.which("ffprobe", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffprobe = os.getenv("CUTSIEVE_FFPROBE") or shutil.which("ffprobe", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffprobe:
         pytest.skip("FFprobe required")
     started, stopped = Event(), Event()

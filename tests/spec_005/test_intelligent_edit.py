@@ -1,7 +1,7 @@
 import pytest
-from dovideo.application.edit_instructions import choose_intervals, literal_plan
-from dovideo.application.workflow_routing import replacement_request
-from dovideo.application.workflow_state import NeedsInput
+from cutsieve.application.edit_instructions import choose_intervals, literal_plan
+from cutsieve.application.workflow_routing import replacement_request
+from cutsieve.application.workflow_state import NeedsInput
 
 
 def test_chinese_audio_and_clip_instructions():

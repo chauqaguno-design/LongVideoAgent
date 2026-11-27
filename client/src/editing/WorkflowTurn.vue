@@ -69,7 +69,7 @@ async function inspectRun(event) {
     <p class="conversation-user">{{ turn.message }}</p>
     <div class="conversation-response">
       <header>
-        <strong>ReelCue</strong><small>{{ label(turn.status) }}</small>
+        <strong>CutSieve</strong><small>{{ label(turn.status) }}</small>
         <small v-if="timeline">版本 {{ timeline.revision_no }}</small>
       </header>
       <ol v-if="plan.length" class="conversation-plan" aria-label="任务计划">

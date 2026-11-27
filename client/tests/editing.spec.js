@@ -222,7 +222,7 @@ test('old revision results never replace the displayed revision', async () => {
   await flushPromises()
   expect(wrapper.find('video').attributes('src')).toBe('/signed-new-file')
   expect(wrapper.find('a[download]').attributes('href')).toBe('/signed-new-file')
-  expect(wrapper.find('a[download]').attributes('download')).toBe('videomind-r1.mp4')
+  expect(wrapper.find('a[download]').attributes('download')).toBe('cutsieve-r1.mp4')
   expect(fetch.mock.calls.some(([url]) => url.includes('old-file'))).toBe(false)
 })
 
@@ -250,7 +250,7 @@ test.each([['webm', 'WebM', 'video/webm'], ['mkv', 'MKV', 'video/x-matroska']])(
     await click(timeline, '打开成片')
     await flushPromises()
     expect(timeline.get('a[download]').text()).toBe('下载 ' + label)
-    expect(timeline.get('a[download]').attributes('download')).toBe('videomind-r1.' + extension)
+    expect(timeline.get('a[download]').attributes('download')).toBe('cutsieve-r1.' + extension)
     expect(timeline.find('video').exists()).toBe(extension === 'webm')
     await click(timeline, '生成预览')
     await flushPromises()
@@ -261,7 +261,7 @@ test.each([['webm', 'WebM', 'video/webm'], ['mkv', 'MKV', 'video/x-matroska']])(
       edit_project_id: 'e', revision_id: 'r1' }, active: true })
     await flushPromises()
     expect(chat.get('a[download]').text()).toBe('下载本次导出的 ' + label)
-    expect(chat.get('a[download]').attributes('download')).toBe('videomind-r1.' + extension)
+    expect(chat.get('a[download]').attributes('download')).toBe('cutsieve-r1.' + extension)
   })
 
 test('upload sends bytes only to its signed URL, then completes with the returned ETag', async () => {

@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from dovideo.infrastructure.edit_captions import Cue, map_cues
-from dovideo.infrastructure.edit_media import compile_timeline, probe_media, render_timeline
+from cutsieve.infrastructure.edit_captions import Cue, map_cues
+from cutsieve.infrastructure.edit_media import compile_timeline, probe_media, render_timeline
 
 pytestmark = pytest.mark.real_media
 
@@ -20,12 +20,12 @@ def uid():
 
 @pytest.fixture(scope="module")
 def tools():
-    directory = os.getenv("DOVIDEO_FFMPEG_DIR")
+    directory = os.getenv("CUTSIEVE_FFMPEG_DIR")
     result = {}
     for name in ("ffmpeg", "ffprobe"):
-        exe = os.getenv(f"DOVIDEO_{name.upper()}") or shutil.which(name, path=directory)
+        exe = os.getenv(f"CUTSIEVE_{name.upper()}") or shutil.which(name, path=directory)
         if not exe:
-            pytest.skip(f"Set DOVIDEO_FFMPEG_DIR or add {name} to PATH")
+            pytest.skip(f"Set CUTSIEVE_FFMPEG_DIR or add {name} to PATH")
         result[name] = exe
     return result
 
@@ -120,7 +120,7 @@ def test_vfr_and_rotation_crop(tmp_path, tools):
 
 @pytest.mark.parametrize("container", ["mp4", "webm", "mkv"])
 def test_overlapping_soft_captions_survive_mux_and_validation(tmp_path, movies, tools, container):
-    from dovideo.infrastructure.edit_captions import parse_srt
+    from cutsieve.infrastructure.edit_captions import parse_srt
 
     mid, track = uid(), uid()
     cut = dict(clip(mid, 0, 1_000_000), caption_track_id=track)

@@ -7,26 +7,26 @@ import subprocess
 import pytest
 from sqlalchemy import create_engine, insert, select
 
-from dovideo.application.edit_sources import EditSources
-from dovideo.application.edit_timeline import uid
-from dovideo.application.workflow_checkpoint import PlanAttempt
-from dovideo.application.workflow_inspections import (
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.application.edit_timeline import uid
+from cutsieve.application.workflow_checkpoint import PlanAttempt
+from cutsieve.application.workflow_inspections import (
     WaitInspection,
     inspection,
     pending_inspection,
     run_inspection,
 )
-from dovideo.application.workflow_state import DEFAULT_BUDGET
-from dovideo.infrastructure.edit_captions import Cue, write_srt
-from dovideo.infrastructure.edit_media import inspect_output
-from dovideo.infrastructure.media.source_artifacts import digest_file
-from dovideo.infrastructure.persistence.edit_repository import EditRepository
-from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES, artifacts, jobs
-from dovideo.infrastructure.persistence.render_worker import RenderWorker, media_binaries
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
-from dovideo.infrastructure.persistence.workflow_repository import WorkflowRepository
-from dovideo.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES
+from cutsieve.application.workflow_state import DEFAULT_BUDGET
+from cutsieve.infrastructure.edit_captions import Cue, write_srt
+from cutsieve.infrastructure.edit_media import inspect_output
+from cutsieve.infrastructure.media.source_artifacts import digest_file
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository
+from cutsieve.infrastructure.persistence.edit_tables import EDIT_TABLES, artifacts, jobs
+from cutsieve.infrastructure.persistence.render_worker import RenderWorker, media_binaries
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base
+from cutsieve.infrastructure.persistence.workflow_repository import WorkflowRepository
+from cutsieve.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES
 from test_workflow_vision import ColorSequenceVerifier
 
 

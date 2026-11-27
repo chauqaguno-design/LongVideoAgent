@@ -10,9 +10,9 @@ from threading import Event, Thread
 from fastapi.testclient import TestClient
 import pytest
 
-from dovideo.application.workflow_state import DEFAULT_BUDGET
-from dovideo.infrastructure.providers.workflow_flash import FlashPlanner
-from dovideo.presentation.api.app import create_app
+from cutsieve.application.workflow_state import DEFAULT_BUDGET
+from cutsieve.infrastructure.providers.workflow_flash import FlashPlanner
+from cutsieve.presentation.api.app import create_app
 from test_workspace_contract import json_body, prepare_workspace, wait_for
 
 
@@ -50,21 +50,21 @@ def events(client, run):
 
 @pytest.mark.real_media
 def test_socket_timeout_and_decoded_export_have_correlated_durable_traces(tmp_path, monkeypatch):
-    ffmpeg = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
+    monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
     root = tmp_path / "app"
     with TestClient(create_app(work_dir=root)) as client, slow_endpoint() as (url, received):
         movie = prepare_workspace(client, tmp_path, ffmpeg, "trace_editor")
         model = "deepseek-flash-local-test"
         planner = FlashPlanner({
-            "DOVIDEO_WORKFLOW_LIVE_MODEL": "1", "DOVIDEO_MODEL_BASE_URL": url,
-            "DOVIDEO_MODEL_MODEL": "deepseek-flash", "DOVIDEO_MODEL_API_KEY": "loopback-fixture-only",
-            "DOVIDEO_MODEL_VERSION": model, "DOVIDEO_MODEL_NATIVE_TOOLS": "1",
-            "DOVIDEO_MODEL_TIMEOUT_SECONDS": "0.25", "DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS": "50000",
-            "DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION": "200", "DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION": "600",
-            "DOVIDEO_FLASH_PRICE_VERSION": "fixture-price-2026",
+            "CUTSIEVE_WORKFLOW_LIVE_MODEL": "1", "CUTSIEVE_MODEL_BASE_URL": url,
+            "CUTSIEVE_MODEL_MODEL": "deepseek-flash", "CUTSIEVE_MODEL_API_KEY": "loopback-fixture-only",
+            "CUTSIEVE_MODEL_VERSION": model, "CUTSIEVE_MODEL_NATIVE_TOOLS": "1",
+            "CUTSIEVE_MODEL_TIMEOUT_SECONDS": "0.25", "CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS": "50000",
+            "CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION": "200", "CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION": "600",
+            "CUTSIEVE_FLASH_PRICE_VERSION": "fixture-price-2026",
         })
         client.app.state.workflow_worker.planner = planner
         failed = json_body(client.post("/v1/workflow-runs", json=dict(scope=movie["scope"], intent="EDIT",
@@ -104,7 +104,7 @@ def test_socket_timeout_and_decoded_export_have_correlated_durable_traces(tmp_pa
         assert report["full_decode"] and report["render_latency_ms"] > 0
         assert report["render_job_id"] == movie["job"] and report["revision_id"] == movie["revision"]
         assert json_body(client.get("/v1/workflow-runs/" + movie["run"]))["budget_usage"]["model_calls"] == 0
-        if dest := os.getenv("VIDEOMIND_TEST_TRACE_OUTPUT"):
+        if dest := os.getenv("CUTSIEVE_TEST_TRACE_OUTPUT"):
             proof = dict(external_model_calls=0, loopback_http_calls=1,
                          timeout=dict(run_id=failed, reserved=start, settlement=final, usage=usage),
                          render=dict(run_id=movie["run"], submission=submit, completion=done,

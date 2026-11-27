@@ -8,14 +8,14 @@ import test from 'node:test'
 import { chromium } from 'playwright-core'
 
 test('one conversation finds two quotes, clarifies the selection, previews and exports', { timeout: 180000 }, async t => {
-  const base = process.env.VIDEOMIND_EDIT_UI || 'http://127.0.0.1:5175'
+  const base = process.env.CUTSIEVE_EDIT_UI || 'http://127.0.0.1:5175'
   assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(base).hostname))
-  const tmp = await mkdtemp(path.join(tmpdir(), 'videomind-conversation-'))
+  const tmp = await mkdtemp(path.join(tmpdir(), 'cutsieve-conversation-'))
   t.after(() => rm(tmp, { recursive: true, force: true }))
   const movie = path.join(tmp, 'train.mp4'), subtitles = path.join(tmp, 'ticket.srt')
   await writeFile(subtitles, '1\n00:00:01,000 --> 00:00:02,000\nTicket\n\n2\n00:00:04,000 --> 00:00:05,000\nTicket\n')
-  const ffmpeg = process.env.DOVIDEO_FFMPEG || (process.env.DOVIDEO_FFMPEG_DIR
-    ? path.join(process.env.DOVIDEO_FFMPEG_DIR, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : 'ffmpeg')
+  const ffmpeg = process.env.CUTSIEVE_FFMPEG || (process.env.CUTSIEVE_FFMPEG_DIR
+    ? path.join(process.env.CUTSIEVE_FFMPEG_DIR, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : 'ffmpeg')
   execFileSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=160x96:r=10:d=6', '-i', subtitles,
     '-map', '0:v', '-map', '1:s', '-c:v', 'libx264', '-c:s', 'mov_text', movie])
   const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
@@ -25,7 +25,7 @@ test('one conversation finds two quotes, clarifies the selection, previews and e
   page.setDefaultTimeout(30000)
   const errors = []
   page.on('pageerror', e => errors.push(e.message))
-  const output = process.env.VIDEOMIND_EDIT_EVIDENCE
+  const output = process.env.CUTSIEVE_EDIT_EVIDENCE
   if (output) await mkdir(output, { recursive: true })
   const button = name => page.getByRole('button', { name, exact: true })
   const post = (p, data) => page.request.post(base + p, { data })
@@ -85,8 +85,8 @@ test('one conversation finds two quotes, clarifies the selection, previews and e
   const [download] = await Promise.all([page.waitForEvent('download'), link.click()])
   const bytes = await readFile(await download.path())
   assert.equal(bytes.subarray(4, 8).toString(), 'ftyp')
-  const probe = process.env.DOVIDEO_FFPROBE || (process.env.DOVIDEO_FFMPEG_DIR
-    ? path.join(process.env.DOVIDEO_FFMPEG_DIR, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe') : 'ffprobe')
+  const probe = process.env.CUTSIEVE_FFPROBE || (process.env.CUTSIEVE_FFMPEG_DIR
+    ? path.join(process.env.CUTSIEVE_FFMPEG_DIR, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe') : 'ffprobe')
   const duration = Number(execFileSync(probe, ['-v', 'error', '-show_entries', 'format=duration',
     '-of', 'csv=p=0', await download.path()], { encoding: 'utf8' }).trim())
   assert.ok(Math.abs(duration - 3) < .15)

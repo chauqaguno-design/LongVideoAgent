@@ -1,4 +1,4 @@
-from dovideo.infrastructure.search_encoder import SearchEncoder
+from cutsieve.infrastructure.search_encoder import SearchEncoder
 
 
 def test_same_dimensions_do_not_authorize_another_checkpoint(tmp_path, monkeypatch):

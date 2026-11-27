@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from dovideo.infrastructure.vector.qdrant import JsonHttpResponse, QdrantVectorError, QdrantVectorIndex
+from cutsieve.infrastructure.vector.qdrant import JsonHttpResponse, QdrantVectorError, QdrantVectorIndex
 
 
 ResponseFactory = Callable[[], object | Awaitable[object]]

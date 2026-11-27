@@ -9,8 +9,8 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from dovideo.application.media_sampling import sample_points, segments, windows
-from dovideo.presentation.api.app import create_app
+from cutsieve.application.media_sampling import sample_points, segments, windows
+from cutsieve.presentation.api.app import create_app
 
 
 def test_plan_spreads_base_budget_across_two_hours_and_covers_tail():
@@ -25,10 +25,10 @@ def test_plan_spreads_base_budget_across_two_hours_and_covers_tail():
 
 @pytest.mark.real_media
 def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch):
-    exe = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    exe = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not exe:
         pytest.skip("FFmpeg required")
-    for setting in ("DOVIDEO_WHISPER_DIR", "DOVIDEO_PADDLE_OCR_DIR"):
+    for setting in ("CUTSIEVE_WHISPER_DIR", "CUTSIEVE_PADDLE_OCR_DIR"):
         monkeypatch.delenv(setting, raising=False)
     srt = tmp_path / "words.srt"
     srt.write_text(
@@ -175,14 +175,14 @@ def verify_caption_render(http, project_id, track, folder, ffmpeg, monkeypatch):
     revision = post(ops, expected_revision=1, reason="烧录字幕",
                     operations=[dict(op="set_caption_policy", caption_policy="burn_aligned")],
                     idempotency_key="caption-burn")["revision_id"]
-    font = next((p for p in [os.getenv("DOVIDEO_CAPTION_FONT"), "C:/Windows/Fonts/simhei.ttf",
+    font = next((p for p in [os.getenv("CUTSIEVE_CAPTION_FONT"), "C:/Windows/Fonts/simhei.ttf",
                              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"] if p and Path(p).is_file()), None)
-    monkeypatch.delenv("DOVIDEO_CAPTION_FONT", raising=False)
+    monkeypatch.delenv("CUTSIEVE_CAPTION_FONT", raising=False)
     missing = http.post("/v1/render-jobs", json=dict(revision_id=revision, profile="PREVIEW",
                                                       idempotency_key="font-unavailable"))
     assert missing.status_code == 503
     if font:
-        monkeypatch.setenv("DOVIDEO_CAPTION_FONT", font)
+        monkeypatch.setenv("CUTSIEVE_CAPTION_FONT", font)
         burned = render(revision, "caption-burned")
         def frame(movie, when):
             return subprocess.check_output([*args, str(movie), "-ss", when, "-frames:v", "1",

@@ -11,10 +11,10 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from dovideo.application.edit_instructions import literal_plan
-from dovideo.application.evidence_search import exclude_subtitles
-from dovideo.application.workflow_state import NeedsInput
-from dovideo.presentation.api.app import create_app
+from cutsieve.application.edit_instructions import literal_plan
+from cutsieve.application.evidence_search import exclude_subtitles
+from cutsieve.application.workflow_state import NeedsInput
+from cutsieve.presentation.api.app import create_app
 
 
 def test_subtitle_exclusions_use_covered_half_open_intervals():
@@ -33,10 +33,10 @@ def test_subtitle_exclusions_use_covered_half_open_intervals():
 
 @pytest.mark.real_media
 def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_path, monkeypatch):
-    ffmpeg = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
+    monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
 
     def ff(*args):
         return subprocess.run(

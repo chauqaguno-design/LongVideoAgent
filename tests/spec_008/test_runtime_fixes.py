@@ -10,22 +10,22 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, select
 
-from dovideo.application.edit_sources import EditSources
-from dovideo.application.edit_timeline import EditError, uid
-from dovideo.application.workflow_identity import completion_tokens_for, context_estimate
-from dovideo.application.workflow_review import render_document, repair_for, review_issue, review_report
-from dovideo.application.workflow_state import DEFAULT_BUDGET, new_state
-from dovideo.infrastructure.persistence.edit_repository import EditRepository
-from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES
-from dovideo.infrastructure.persistence.media_visual_budget import billed_window
-from dovideo.infrastructure.persistence.processing_catalog import MediaCatalog
-from dovideo.infrastructure.persistence.processing_tables import records, runs as processing_runs
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
-from dovideo.infrastructure.persistence.workflow_budget import run_model
-from dovideo.infrastructure.persistence.workflow_repository import WorkflowRepository
-from dovideo.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES, model_requests
-from dovideo.infrastructure.providers.workflow_flash import FlashPlanner
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.application.edit_timeline import EditError, uid
+from cutsieve.application.workflow_identity import completion_tokens_for, context_estimate
+from cutsieve.application.workflow_review import render_document, repair_for, review_issue, review_report
+from cutsieve.application.workflow_state import DEFAULT_BUDGET, new_state
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository
+from cutsieve.infrastructure.persistence.edit_tables import EDIT_TABLES
+from cutsieve.infrastructure.persistence.media_visual_budget import billed_window
+from cutsieve.infrastructure.persistence.processing_catalog import MediaCatalog
+from cutsieve.infrastructure.persistence.processing_tables import records, runs as processing_runs
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base
+from cutsieve.infrastructure.persistence.workflow_budget import run_model
+from cutsieve.infrastructure.persistence.workflow_repository import WorkflowRepository
+from cutsieve.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES, model_requests
+from cutsieve.infrastructure.providers.workflow_flash import FlashPlanner
 
 
 class RecordingTransport:
@@ -43,14 +43,14 @@ class RecordingTransport:
 @pytest.fixture
 def model_env():
     return dict(
-        DOVIDEO_MODEL_BASE_URL="http://127.0.0.1:8000/v1",
-        DOVIDEO_MODEL_MODEL="deepseek/deepseek-chat",
-        DOVIDEO_WORKFLOW_LIVE_MODEL="1",
-        DOVIDEO_FLASH_PRICE_VERSION="fixture",
-        DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="1000000",
-        DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="1000000",
-        DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="9000",
-        DOVIDEO_MEDIA_VISUAL_MAX_CNY_MICROUNITS="9000",
+        CUTSIEVE_MODEL_BASE_URL="http://127.0.0.1:8000/v1",
+        CUTSIEVE_MODEL_MODEL="deepseek/deepseek-chat",
+        CUTSIEVE_WORKFLOW_LIVE_MODEL="1",
+        CUTSIEVE_FLASH_PRICE_VERSION="fixture",
+        CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="1000000",
+        CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="1000000",
+        CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS="9000",
+        CUTSIEVE_MEDIA_VISUAL_MAX_CNY_MICROUNITS="9000",
     )
 
 
@@ -89,22 +89,22 @@ def test_context_estimate_uses_character_rates(char, tokens_per_char):
 
 def test_completion_token_limits_use_phase_defaults_and_overrides(monkeypatch):
     assert completion_tokens_for("PLAN", {}) == 1536
-    env = dict(DOVIDEO_PLAN_MAX_TOKENS="2048", DOVIDEO_COMPLETION_TOKENS="960")
+    env = dict(CUTSIEVE_PLAN_MAX_TOKENS="2048", CUTSIEVE_COMPLETION_TOKENS="960")
     assert completion_tokens_for("PLAN", env) == 2048
     for phase in (None, "MATERIAL", "REVIEW"):
         assert completion_tokens_for(phase, {}) == 768
         assert completion_tokens_for(phase, env) == 960
-    assert completion_tokens_for("PLAN", dict(env, DOVIDEO_PLAN_MAX_TOKENS="100")) == 256
-    assert completion_tokens_for("REVIEW", dict(env, DOVIDEO_COMPLETION_TOKENS="0")) == 256
-    assert completion_tokens_for("PLAN", dict(env, DOVIDEO_PLAN_MAX_TOKENS="invalid")) == 1536
-    monkeypatch.setenv("DOVIDEO_PLAN_MAX_TOKENS", "2200")
+    assert completion_tokens_for("PLAN", dict(env, CUTSIEVE_PLAN_MAX_TOKENS="100")) == 256
+    assert completion_tokens_for("REVIEW", dict(env, CUTSIEVE_COMPLETION_TOKENS="0")) == 256
+    assert completion_tokens_for("PLAN", dict(env, CUTSIEVE_PLAN_MAX_TOKENS="invalid")) == 1536
+    monkeypatch.setenv("CUTSIEVE_PLAN_MAX_TOKENS", "2200")
     assert completion_tokens_for("PLAN") == 2200
 
 
 def test_workflow_reserves_language_estimate_and_sends_the_fingerprinted_limit(
     source_store, model_env, visual_messages
 ):
-    env = dict(model_env, DOVIDEO_PLAN_MAX_TOKENS="1792", DOVIDEO_COMPLETION_TOKENS="960")
+    env = dict(model_env, CUTSIEVE_PLAN_MAX_TOKENS="1792", CUTSIEVE_COMPLETION_TOKENS="960")
     repo = WorkflowRepository(EditRepository(source_store))
     workspace = uid()
     project = source_store.create_project(workspace, "Budget")["project_id"]
@@ -144,7 +144,7 @@ def test_workflow_reserves_language_estimate_and_sends_the_fingerprinted_limit(
         assert db.scalar(select(model_requests.c.reserved)) == expected_bound + 1792
 
     with pytest.raises(EditError) as conflict:
-        changed = dict(env, DOVIDEO_PLAN_MAX_TOKENS="1793")
+        changed = dict(env, CUTSIEVE_PLAN_MAX_TOKENS="1793")
         run_model(repo, claim, "plan", visual_messages, [], changed, send, identity=identity)
     assert conflict.value.code == "MODEL_INPUT_CONFLICT"
     assert len(transport.payloads) == 1

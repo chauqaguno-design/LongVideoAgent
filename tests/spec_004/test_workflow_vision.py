@@ -11,32 +11,32 @@ import subprocess
 from PIL import Image
 import pytest
 from sqlalchemy import create_engine, update
-from dovideo.application.workflow_inspections import (
+from cutsieve.application.workflow_inspections import (
     WaitInspection,
     inspection,
     pending_inspection,
     run_inspection,
 )
-from dovideo.application.workflow_tools import job_status
-from dovideo.application.workflow_shots import distinct_candidates
-from dovideo.application.edit_sources import EditSources
-from dovideo.application.edit_timeline import uid
-from dovideo.application.workflow_state import DEFAULT_BUDGET
-from dovideo.infrastructure.persistence.edit_repository import EditRepository
-from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES
-from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
-from dovideo.infrastructure.persistence.workflow_repository import WorkflowRepository
-from dovideo.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES
-from dovideo.infrastructure.workflow_vision import review_interval
+from cutsieve.application.workflow_tools import job_status
+from cutsieve.application.workflow_shots import distinct_candidates
+from cutsieve.application.edit_sources import EditSources
+from cutsieve.application.edit_timeline import uid
+from cutsieve.application.workflow_state import DEFAULT_BUDGET
+from cutsieve.infrastructure.persistence.edit_repository import EditRepository
+from cutsieve.infrastructure.persistence.edit_tables import EDIT_TABLES
+from cutsieve.infrastructure.persistence.source_tables import projects, sources
+from cutsieve.infrastructure.persistence.sqlalchemy import Base
+from cutsieve.infrastructure.persistence.workflow_repository import WorkflowRepository
+from cutsieve.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES
+from cutsieve.infrastructure.workflow_vision import review_interval
 
 
 class ColorSequenceVerifier:
     env = {
-        "DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS": "100000",
-        "DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION": "10",
-        "DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION": "20",
-        "DOVIDEO_FLASH_PRICE_VERSION": "offline-fixture",
+        "CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS": "100000",
+        "CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION": "10",
+        "CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION": "20",
+        "CUTSIEVE_FLASH_PRICE_VERSION": "offline-fixture",
     }
 
     def identity(self, *, vision=False):
@@ -72,7 +72,7 @@ def test_candidate_budget_covers_distinct_source_ranges():
 
 @pytest.mark.real_media
 def test_ordered_source_frames_and_output_review(tmp_path):
-    ffmpeg = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
     movie = tmp_path / "two-colors.mp4"

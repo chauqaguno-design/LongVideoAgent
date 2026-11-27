@@ -1,7 +1,7 @@
 """Add shared side-effect delivery."""
 
 from alembic import op
-from dovideo.infrastructure.persistence.outbox_tables import define_v1
+from cutsieve.infrastructure.persistence.outbox_tables import define_v1
 
 revision = "0010_shared_outbox"
 down_revision = "0009_workflows"

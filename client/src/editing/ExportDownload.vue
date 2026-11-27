@@ -7,7 +7,7 @@ const props = defineProps({ file: { type: Object, required: true }, revisionId: 
   caption: { type: String, default: '下载' } })
 const emit = defineEmits(['error'])
 const format = computed(() => exportFormat(props.file.mime_type))
-const filename = computed(() => 'videomind-' + props.revisionId + (format.value ? '.' + format.value.extension : ''))
+const filename = computed(() => 'cutsieve-' + props.revisionId + (format.value ? '.' + format.value.extension : ''))
 
 async function download(event) {
   if (!props.file.url_expires_at || Date.parse(props.file.url_expires_at) > Date.now() + 1000) return

@@ -30,7 +30,7 @@ jobs:
         run: python -m compileall -q src scripts alembic
       - name: Alembic upgrade and model drift
         env:
-          DOVIDEO_DATABASE_URL: sqlite:///migration-ci.db
+          CUTSIEVE_DATABASE_URL: sqlite:///migration-ci.db
         run: |
           alembic upgrade head
           alembic upgrade head

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 import pytest
 from PIL import Image
 
-from dovideo.presentation.api.app import create_app
+from cutsieve.presentation.api.app import create_app
 
 
 def check_image_workflow(client, project, media, post, wait):
@@ -52,7 +52,7 @@ def check_image_workflow(client, project, media, post, wait):
 
 @pytest.mark.real_media
 def test_natural_time_request_preview_and_restore_after_restart(tmp_path, monkeypatch):
-    ffmpeg = os.getenv("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("DOVIDEO_FFMPEG_DIR"))
+    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
     source = tmp_path / "test.mp4"
@@ -146,10 +146,10 @@ def test_natural_time_request_preview_and_restore_after_restart(tmp_path, monkey
             headers={"Last-Event-ID": workflow["last_event_id"]},
         )
         assert events.status_code == 200 and "event: completed" in events.text
-        monkeypatch.setenv("DOVIDEO_WORKFLOWS_ENABLED", "false")
+        monkeypatch.setenv("CUTSIEVE_WORKFLOWS_ENABLED", "false")
         assert c.post("/v1/workflow-runs", json=body).status_code == 503
         assert c.get(f"/v1/workflow-runs/{state['run_id']}/result").json() == result
-    monkeypatch.setenv("DOVIDEO_WORKFLOWS_ENABLED", "true")
+    monkeypatch.setenv("CUTSIEVE_WORKFLOWS_ENABLED", "true")
     with TestClient(create_app(work_dir=work)) as c:
         sign_in(c)
         assert c.get(f"/v1/workflow-runs/{state['run_id']}/result").json() == result

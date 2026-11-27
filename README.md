@@ -1,6 +1,6 @@
-# ReelCue · 镜寻剪辑台
+# CutSieve · 剪筛工作台
 
-ReelCue 是一个本地优先的长视频多模态检索与粗剪工作台。上传视频后自动提取时间对齐的字幕、语音、画面文字与采样帧；你可以用自然语言查找台词或无声画面，核实原片时间戳后直接在版本化时间线上粗剪、预览并导出成片。
+CutSieve 是一个本地优先的长视频多模态检索与粗剪工作台。上传视频后自动提取时间对齐的字幕、语音、画面文字与采样帧；你可以用自然语言查找台词或无声画面，核实原片时间戳后直接在版本化时间线上粗剪、预览并导出成片。
 
 ## 核心架构
 
@@ -27,16 +27,16 @@ FastAPI 应用进程（本地 SQLite WAL + 本地磁盘 + 可选 Qdrant）
 
 ## 1 分钟本地启动
 
-需要 **Python 3.12+**、**Node.js 22.12+**，以及 PATH 中的 **FFmpeg / ffprobe**（或通过 `DOVIDEO_FFMPEG_DIR` 指定目录）。
+需要 **Python 3.12+**、**Node.js 22.12+**，以及 PATH 中的 **FFmpeg / ffprobe**（或通过 `CUTSIEVE_FFMPEG_DIR` 指定目录）。
 
 ### 1. 启动后端
 
 ```powershell
-git clone https://github.com/chauqaguno-design/LongVideoAgent.git ReelCue
-cd ReelCue
+git clone https://github.com/chauqaguno-design/CutSieve.git
+cd CutSieve
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -c constraints-py312.txt -e ".[test]"
-.\.venv\Scripts\python.exe -m uvicorn dovideo.presentation.api.app:create_app --factory --host 127.0.0.1 --port 8173 --workers 1
+.\.venv\Scripts\python.exe -m uvicorn cutsieve.presentation.api.app:create_app --factory --host 127.0.0.1 --port 8173 --workers 1
 ```
 
 ### 2. 启动前端
@@ -44,7 +44,7 @@ py -3.12 -m venv .venv
 ```powershell
 cd client
 npm ci
-$env:VITE_DEV_PROXY_TARGET = 'http://127.0.0.1:8173'
+$env:CUTSIEVE_DEV_PROXY_TARGET = 'http://127.0.0.1:8173'
 npm run dev -- --host 127.0.0.1 --port 5175
 ```
 
@@ -75,4 +75,4 @@ npm run build
 
 ## 来源与许可
 
-ReelCue 基于开源项目 [VideoMind](https://github.com/Morimi-Kazuha/VideoMind) 重构演进，前端包含部分 DOVideo-AI 代码。详情见 [MIT 许可](LICENSE)、[前端声明](client/NOTICE.md) 与 [第三方许可](THIRD_PARTY_NOTICES.md)。
+CutSieve 基于开源项目 [VideoMind](https://github.com/Morimi-Kazuha/VideoMind) 重构演进，前端包含部分 DOVideo-AI 代码。详情见 [MIT 许可](LICENSE)、[前端声明](client/NOTICE.md) 与 [第三方许可](THIRD_PARTY_NOTICES.md)。
