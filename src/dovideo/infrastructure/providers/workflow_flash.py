@@ -3,11 +3,42 @@
 import asyncio
 import json
 import os
+import re
+from threading import local
+from weakref import finalize
 
 from dovideo.application.edit_timeline import EditError
+from dovideo.application.workflow_identity import completion_tokens_for, reserved_completion_tokens
 from dovideo.application.workflow_state import NeedsInput
-from .flash_preflight import current_report, flash_config
+from .config import configured_model, model_supports_vision, model_tool_mode
 from .http import StdlibAsyncJsonPostClient, response_parts
+
+
+_request_thread = local()
+_SNAPSHOT_SUFFIX = re.compile(r"-(?:[0-9]{8}|[0-9]{4}-[0-9]{2}-[0-9]{2})\Z")
+
+
+class _RequestLoop:
+    def __init__(self):
+        self.loop = asyncio.new_event_loop()
+        finalize(self, self.loop.close)
+
+
+def _request_loop():
+    if not hasattr(_request_thread, "event_loop"):
+        _request_thread.event_loop = _RequestLoop()
+    return _request_thread.event_loop.loop
+
+
+def compatible_model(expected, actual) -> bool:
+    """Compare model names across provider namespaces and date-stamped snapshots."""
+    if not isinstance(expected, str) or not isinstance(actual, str):
+        return False
+    expected = expected.rsplit("/", 1)[-1].strip()
+    actual = actual.rsplit("/", 1)[-1].strip()
+    expected_base = _SNAPSHOT_SUFFIX.sub("", expected) or expected
+    actual_base = _SNAPSHOT_SUFFIX.sub("", actual) or actual
+    return bool(expected_base) and expected_base == actual_base
 
 
 class FlashPlanner:
@@ -18,52 +49,56 @@ class FlashPlanner:
     def identity(self, *, vision=False):
         if self.env.get("DOVIDEO_WORKFLOW_LIVE_MODEL") != "1":
             raise NeedsInput("当前为本地模式。可指定例如“剪出 1 到 3 秒”，或用引号指定原片台词。")
-        report = current_report(self.env)
-        checks = report["checks"]
-        if not checks["text"] or not (checks["json_loop"] or checks["native_loop"]):
-            raise EditError(503, "CAPABILITY_UNAVAILABLE", "Flash 文本与工具协议尚未完成实测")
-        if vision and not (checks["image"] and checks["image_json"]):
-            raise EditError(503, "VISION_UNAVAILABLE", "Flash 图像与结构化响应尚未通过真实能力预检")
+        config = self._config()
+        if vision and not model_supports_vision(self.env):
+            raise EditError(503, "VISION_UNAVAILABLE", "当前模型部署未启用图像输入")
+        return self._identity(config)
+
+    def _config(self):
+        config = configured_model(self.env)
+        if config is None:
+            raise EditError(503, "CAPABILITY_UNAVAILABLE", "请配置有效的模型部署")
+        return config
+
+    def _identity(self, config):
         return dict(
-            fingerprint=report["fingerprint"],
-            model=report["resolved_model_version"],
-            mode="native" if checks["native_loop"] else "json",
+            fingerprint=config.fingerprint(),
+            model=config.resolved_model,
+            mode=model_tool_mode(self.env),
         )
 
-    def request(self, dialogs, identity, tool_specs, deadline):
-        config = flash_config(self.env)
-        opts = dict(model=config.model, messages=dialogs, max_tokens=512, stream=False)
+    def request(self, dialogs, identity, tool_specs, deadline, *, phase=None, max_tokens=None):
+        config = self._config()
+        if identity != self._identity(config):
+            raise EditError(409, "MODEL_CHANGED", "原任务依赖的模型版本或协议已改变")
+        limit = reserved_completion_tokens.get()
+        if limit is None:
+            limit = completion_tokens_for(phase, self.env) if max_tokens is None else max_tokens
+        opts = dict(model=config.model, messages=dialogs, max_tokens=limit, stream=False,
+                    **config.request_options())
         if identity["mode"] == "native" and tool_specs:
             opts["tools"] = tool_specs
         else:
             opts["response_format"] = {"type": "json_object"}
-        if config.transport == "openrouter":
-            opts["provider"] = dict(
-                only=list(config.provider_only),
-                allow_fallbacks=False,
-                require_parameters=True,
-                data_collection="deny",
-                zdr=True,
-            )
 
         async def post():
             r = await self.transport.post(
                 config.chat_url,
-                headers={"Authorization": "Bearer " + config.api_key},
+                headers=config.auth_headers,
                 json=opts,
                 timeout=max(0.1, min(config.timeout_seconds, deadline)),
             )
             code, body = response_parts(r)
             if code in (408, 504):
                 raise TimeoutError("Model endpoint timed out")
-            if code != 200 or body.get("model") != identity["model"]:
-                raise EditError(503, "MODEL_UNAVAILABLE", "已验证的 Flash 部署没有返回有效结果")
+            if code != 200 or not isinstance(body, dict) or not compatible_model(identity["model"], body.get("model")):
+                raise EditError(503, "MODEL_UNAVAILABLE", "配置的模型部署没有返回有效结果")
             return body
 
-        return asyncio.run(post())
+        return _request_loop().run_until_complete(post())
 
 
-def decode_turn(message, mode, catalog, role, allowed):
+def decode_turn(message, mode, catalog, phase, allowed):
     if not isinstance(message, dict) or message.get("role", "assistant") != "assistant":
         raise ValueError("missing protocol message")
     if mode == "native" and message.get("tool_calls"):
@@ -93,7 +128,7 @@ def decode_turn(message, mode, catalog, role, allowed):
     requests = []
     for wire_id, name, args in calls:
         try:
-            tool = catalog.for_provider_call(name, role)
+            tool = catalog.for_provider_call(name, phase)
             if tool.name not in allowed:
                 raise ValueError("tool not available in this phase")
             tool.validate(args)

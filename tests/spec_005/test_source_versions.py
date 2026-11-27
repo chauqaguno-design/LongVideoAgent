@@ -1,4 +1,5 @@
-"""Exercise the source adapter through both the new and original upload APIs."""
+"""Exercise source versioning and readback through the upload API."""
+from hashlib import sha256
 import os
 import shutil
 import subprocess
@@ -27,23 +28,31 @@ def test_same_name_versions_and_reopening_project(tmp_path):
     with TestClient(create_app(work_dir=work)) as client:
         sign_in(client, "maker", register=True)
         project = client.post("/v1/projects", json={"title": "旧片重剪"}).json()["project_id"]
-        imports = []
+        uploaded_sources = []
         for color in ("red", "blue"):
             path = tmp_path / f"{color}.mp4"
             subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", f"color={color}:s=64x48:d=0.3",
                             "-c:v", "libx264", str(path)], check=True)
-            original = client.post("/media/upload", files={"file": ("scene.mp4", path.read_bytes(), "video/mp4")})
-            legacy = original.json()["data"]["id"]
-            url = f"/v1/projects/{project}/imports/{legacy}"
-            asset = client.post(url).json()
-            assert client.post(url).json() == asset
-            imports.append((asset, path))
-        assert imports[0][0]["media_revision_id"] != imports[1][0]["media_revision_id"]
+            contents = path.read_bytes()
+            upload = client.post(f"/v1/projects/{project}/assets", json=dict(filename="scene.mp4",
+                size_bytes=len(contents), content_type="video/mp4", sha256=sha256(contents).hexdigest()))
+            upload.raise_for_status()
+            upload = upload.json()
+            uploaded = client.put(upload["parts"][0]["url"], content=contents)
+            uploaded.raise_for_status()
+            url = "/v1/uploads/" + upload["upload_id"] + "/complete"
+            complete = {"idempotency_key": "version-" + color, "parts": [{"part_number": 1, "etag": uploaded.headers["ETag"]}]}
+            response = client.post(url, json=complete)
+            response.raise_for_status()
+            asset = response.json()
+            assert client.post(url, json=complete).json() == asset
+            uploaded_sources.append((asset, path))
+        assert uploaded_sources[0][0]["media_revision_id"] != uploaded_sources[1][0]["media_revision_id"]
         assert len(client.get(f"/v1/projects/{project}/assets").json()["items"]) == 2
 
     with TestClient(create_app(work_dir=work)) as client:
         sign_in(client, "maker")
-        for asset, path in imports:
+        for asset, path in uploaded_sources:
             revision = client.get("/v1/media-revisions/" + asset["media_revision_id"]).json()
             artifact = client.get("/v1/artifacts/" + revision["source_artifact_id"]).json()
             assert client.get(artifact["url"]).content == path.read_bytes()

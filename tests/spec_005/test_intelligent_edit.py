@@ -1,5 +1,6 @@
 import pytest
 from dovideo.application.edit_instructions import choose_intervals, literal_plan
+from dovideo.application.workflow_routing import replacement_request
 from dovideo.application.workflow_state import NeedsInput
 
 
@@ -18,7 +19,9 @@ def test_chinese_audio_and_clip_instructions():
 
 
 def test_stable_last_clip_replacement_and_duration_selection():
-    assert literal_plan("把最后一段换成剪出 1 到 3 秒")["replace_last"]
+    message = "把最后一段换成剪出 1 到 3 秒"
+    assert replacement_request(message) == (-1, "剪出 1 到 3 秒")
+    assert literal_plan(message)["ranges"] == [dict(start_us=1_000_000, end_us=3_000_000)]
     candidates = [
         ("media", dict(start_us=i, end_us=i + n), ["evidence"]) for i, n in [(0, 1), (3, 3), (8, 2)]
     ]

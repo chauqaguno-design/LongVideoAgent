@@ -9,7 +9,7 @@ import time
 from threading import Barrier
 
 import pytest
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import select, update
 from dovideo.application.edit_instructions import PROFILE
 from dovideo.application.edit_sources import EditSources
 from dovideo.application.edit_timeline import EditError, uid
@@ -17,27 +17,22 @@ from dovideo.application.workflow_state import DEFAULT_BUDGET, NeedsInput
 from dovideo.infrastructure.persistence.edit_repository import EditRepository
 from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES, revisions
 from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
+from dovideo.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
 from dovideo.infrastructure.persistence.workflow_budget import run_model
 from dovideo.infrastructure.persistence.workflow_repository import StaleLease, WorkflowRepository
-from dovideo.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES, model_requests, tasks
+from dovideo.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES, model_requests
 from dovideo.infrastructure.persistence.workspace_budget_table import workspace_budgets
 
 
-@pytest.fixture(params=["sqlite", "mysql"])
-def store(tmp_path, request):
-    if request.param == "mysql":
-        if os.getenv("DOVIDEO_UPLOAD_LIVE") != "1":
-            pytest.skip("uses the disposable MySQL fixture in verify_media_services.py")
-        engine = create_engine(os.environ["DOVIDEO_DATABASE_URL"])
-    else:
-        engine = create_engine(f"sqlite:///{tmp_path}/budget.db")
-        Base.metadata.create_all(engine, tables=[projects, sources, *EDIT_TABLES, *WORKFLOW_TABLES])
+@pytest.fixture
+def store(tmp_path):
+    engine = create_sqlalchemy_engine(f"sqlite:///{tmp_path}/budget.db")
+    Base.metadata.create_all(engine, tables=[projects, sources, *EDIT_TABLES, *WORKFLOW_TABLES])
     yield WorkflowRepository(EditRepository(EditSources(engine, tmp_path)))
     engine.dispose()
 
 
-def test_competing_editor_and_reviewer_cannot_overwrite_coordinator(store):
+def test_nonwriting_stages_and_expired_claims_cannot_patch(store):
     repo = store
     workspace = uid()
     project = repo.sources.create_project(workspace, "Team")["project_id"]
@@ -53,7 +48,6 @@ def test_competing_editor_and_reviewer_cannot_overwrite_coordinator(store):
             message="调整成片尺寸",
             idempotency_key=uid(),
         ),
-        team=True,
     )["run_id"]
 
     def step(claim, next_phase):
@@ -101,7 +95,7 @@ def test_competing_editor_and_reviewer_cannot_overwrite_coordinator(store):
     repo.control(workspace, run, "cancel", {"idempotency_key": uid()})
 
 
-def test_two_roles_share_workspace_cap(store):
+def test_two_runs_share_workspace_cap(store):
     repo = store
     workspace = uid()
     project = repo.sources.create_project(workspace, "Budget")["project_id"]
@@ -116,7 +110,6 @@ def test_two_roles_share_workspace_cap(store):
                 idempotency_key=uid(),
                 budget=dict(DEFAULT_BUDGET, max_cost_microunits=100),
             ),
-            team=True,
         )
         claim = repo.claim(uid())
         assert claim.id == run["run_id"]
@@ -130,7 +123,7 @@ def test_two_roles_share_workspace_cap(store):
         DOVIDEO_FLASH_PRICE_VERSION="fixture",
         DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="1000",
         DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="0",
-        DOVIDEO_WORKFLOW_TASK_MAX_MODEL_CALLS="1",
+        DOVIDEO_WORKFLOW_STAGE_MAX_MODEL_CALLS="1",
     )
 
     def spend(claim):
@@ -156,7 +149,7 @@ def test_two_roles_share_workspace_cap(store):
             [],
             [],
             dict(limits, DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="20"),
-            lambda: pytest.fail("exceeded task budget"),
+            lambda: pytest.fail("exceeded stage budget"),
         )
     with repo.sessions() as db:
         assert (
@@ -168,9 +161,7 @@ def test_two_roles_share_workspace_cap(store):
         origin = db.execute(
             select(model_requests.c.price).where(model_requests.c.run_id == winner.id)
         ).scalar_one()
-        cards = repo.page(workspace, winner.id, tasks, None, 10)["items"]
-        billed_card = next(card for card in cards if card["task_id"] == origin["task_id"])
-        assert billed_card["role"] == ("EDITOR" if winner.id == claims[0].id else "REVIEWER")
+        assert origin["budget_scope"] == winner.state["phase"]
     for claim in claims:
         repo.control(workspace, claim.id, "cancel", {"idempotency_key": uid()})
 
@@ -235,14 +226,16 @@ def test_fenced_patch_reads_scoped_workflow_proof_in_its_own_transaction(store):
     repo.control(workspace, writer.id, "cancel", {"idempotency_key": uid()})
 
 
-def team_crash_child():
+def workflow_crash_child():
     from dovideo.infrastructure.persistence.work_outbox import WorkOutbox
 
-    engine = create_engine(os.environ["VM_FAULT_DB"])
+    engine = create_sqlalchemy_engine(os.environ["VM_FAULT_DB"])
     repository = WorkflowRepository(EditRepository(EditSources(engine, Path(os.environ["VM_FAULT_DIR"]))))
     mode = sys.argv[-1]
     if mode == "dispatcher":
-        assert WorkOutbox(repository.edits).claim()
+        event = WorkOutbox(repository.edits).claim()
+        assert event
+        print(event[0], flush=True)
     else:
         claim = repository.claim(uid(), lease_seconds=2)
         assert claim.id == os.environ["VM_FAULT_RUN"]
@@ -256,9 +249,11 @@ def team_crash_child():
     os._exit(77)
 
 
-def test_full_team_restart_after_lost_notifications(store, tmp_path, monkeypatch):
+def test_workflow_restart_after_lost_notifications(store, tmp_path, monkeypatch):
     from dovideo.infrastructure.persistence.workflow_repository import StaleLease
-    from dovideo.infrastructure.persistence.workflow_tables import runs, deliveries
+    from dovideo.infrastructure.persistence.outbox_tables import outbox
+    from dovideo.infrastructure.persistence.work_outbox import WorkOutbox
+    from dovideo.infrastructure.persistence.workflow_tables import runs
 
     repo = store
     workspace = uid()
@@ -266,7 +261,6 @@ def test_full_team_restart_after_lost_notifications(store, tmp_path, monkeypatch
     state = repo.create(
         workspace,
         dict(scope=dict(project_id=project), intent="EDIT", message="恢复", idempotency_key=uid()),
-        team=True,
     )
     rid = state["run_id"]
     engine = repo.sessions.kw["bind"]
@@ -278,24 +272,22 @@ def test_full_team_restart_after_lost_notifications(store, tmp_path, monkeypatch
     )
     for component in ("plan", "dispatcher", "material"):
         exited = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), component], env=environment, timeout=30
+            [sys.executable, str(Path(__file__).resolve()), component], env=environment, timeout=30,
+            capture_output=True, text=True,
         )
-        assert exited.returncode == 77
-    if engine.dialect.name == "mysql":
-        # verify_media_services.py creates and removes this local Redis. Use its isolated test DB.
-        import redis
-        from urllib.parse import urlsplit, urlunsplit
-
-        server = urlsplit(os.environ["DOVIDEO_REDIS_URL"])
-        assert server.hostname == "127.0.0.1"
-        isolated = redis.Redis.from_url(urlunsplit(server._replace(path="/15")))
-        isolated.set("workflow:lost-scheduler-hints", rid)
-        isolated.flushdb()
-        assert isolated.dbsize() == 0
-        isolated.close()
+        assert exited.returncode == 77, exited.stderr
+        if component == "dispatcher":
+            event_id = exited.stdout.strip()
     with repo.edits.write() as db:
         old = db.execute(select(runs).where(runs.c.id == rid)).one()
-        db.execute(update(deliveries).where(deliveries.c.run_id == rid).values(expires=0, accepted=None))
+        assert db.scalar(select(outbox.c.status).where(outbox.c.id == event_id)) == "LEASED"
+        db.execute(update(outbox).where(outbox.c.id == event_id).values(lease=0))
+    relay = WorkOutbox(repo.edits)
+    while relay.dispatch_one():
+        pass
+    assert not relay.receive(event_id)
+    with repo.sessions() as db:
+        assert db.scalar(select(outbox.c.status).where(outbox.c.id == event_id)) == "SENT"
     # Moving the worker clock into the future must not transfer a live DB lease.
     actual = time.time
     monkeypatch.setattr(time, "time", lambda: actual() + 86400)
@@ -307,7 +299,7 @@ def test_full_team_restart_after_lost_notifications(store, tmp_path, monkeypatch
     fresh = WorkflowRepository(repo.edits)
     current = fresh.claim(uid())
     assert current.id == rid and current.fence > old.fence
-    assert fresh.document(workspace, current.checkpoint["brief_id"]).body == {"source": "movie"}
+    assert fresh.document(workspace, current.checkpoint.attempt.brief_id).body == {"source": "movie"}
     assert fresh.invoke(
         current, "material-read", "video.get_segment", {}, lambda: pytest.fail("repeated side effect")
     ) == {"record": "retained"}
@@ -319,4 +311,4 @@ def test_full_team_restart_after_lost_notifications(store, tmp_path, monkeypatch
 
 
 if __name__ == "__main__":
-    team_crash_child()
+    workflow_crash_child()

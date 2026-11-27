@@ -3,9 +3,37 @@
 from collections import Counter
 from collections.abc import Sequence
 import math
+import re
+import unicodedata
 
 from .rank_fusion import RankedCandidate
-from .retrieval_documents import tokenize
+
+_TOKENS = re.compile(r"[\u3400-\u9fff]+|[a-z0-9_]+(?:(?:::|[.+/#:-])[a-z0-9_]+)*(?:\+\+|#)?|[+#]")
+
+
+
+def normalize_text(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+
+def tokenize(text: str) -> tuple[str, ...]:
+    """Chinese unigrams + bigrams; Latin/numeric/identifier compounds.
+
+    Keep exact technical compounds (flashattention-2, b+tree, qkv, foo_bar)
+    and their components. Query repeats are collapsed by the BM25 scorer.
+    """
+    result = []
+    for match in _TOKENS.finditer(normalize_text(text)):
+        token = match.group()
+        if "\u3400" <= token[0] <= "\u9fff":
+            result.extend(token)
+            result.extend(token[i:i + 2] for i in range(len(token) - 1))
+        else:
+            result.append(token)
+            parts = re.split(r"[.+/#:-]", token)
+            if len(parts) > 1:
+                result.extend(part for part in parts if part)
+    return tuple(result)
 
 BM25_K1 = 1.2
 BM25_B = 0.75

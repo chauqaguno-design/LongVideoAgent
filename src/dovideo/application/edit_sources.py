@@ -10,10 +10,22 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from dovideo.infrastructure.persistence.source_tables import projects, sources
+
+
+VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
+
+
+def normalize_video_filename(filename: str) -> str:
+    segments = filename.replace("\\", "/").split("/")
+    name = segments[-1].strip()
+    if ".." in segments or not name or len(name) > 255 or "\x00" in name:
+        raise HTTPException(422, "视频文件名无效")
+    if Path(name).suffix.casefold() not in VIDEO_SUFFIXES:
+        raise HTTPException(422, "支持 MP4、MOV、MKV、AVI、WEBM 和 M4V 格式")
+    return name
 
 
 def workspace_id(user_id: int) -> str:
@@ -39,7 +51,6 @@ class EditSources:
         self.sessions = sessionmaker(engine, expire_on_commit=False)
         self.root = root.resolve()
         self.enqueue_completed = None
-        self.objects = None
 
     def workspace(self, user):
         return workspace_id(int(user["id"]))
@@ -86,20 +97,13 @@ class EditSources:
         return dict(items=[view(row) for row in rows[:limit]],
                     next_cursor=rows[limit-1].id if len(rows) > limit else None)
 
-    def create_upload(self, scope, project_id, body, *, upload_id=None):
+    def create_upload(self, scope, project_id, body):
         self.project(scope, project_id)
         ids = {name: str(uuid4()) for name in ("id", "artifact", "revision", "upload")}
-        if upload_id:
-            ids["upload"] = upload_id
-        try:
-            with self.sessions.begin() as session:
-                session.execute(sources.insert().values(**ids, workspace=scope, project=project_id,
-                    filename=body["filename"], size=body["size_bytes"], mime=body["content_type"],
-                    expected_digest=body.get("sha256"), expires=int(time.time()) + 3600))
-        except IntegrityError:
-            # Concurrent imports of the same immutable legacy source share one upload.
-            if not upload_id:
-                raise
+        with self.sessions.begin() as session:
+            session.execute(sources.insert().values(**ids, workspace=scope, project=project_id,
+                filename=body["filename"], size=body["size_bytes"], mime=body["content_type"],
+                expected_digest=body.get("sha256"), expires=int(time.time()) + 3600))
         return self.upload(scope, ids["upload"])
 
     def upload(self, scope, upload_id):
@@ -133,15 +137,13 @@ class EditSources:
         return self.root / "sources" / scope / digest
 
     def source_path(self, scope, revision_id):
-        return self.materialize(scope, self.media(scope, revision_id)["sha256"])
-
-    def materialize(self, scope, digest):
-        path = self.blob(scope, digest)
-        return self.objects.materialize(scope, digest, path) if self.objects else path
+        return self.blob(scope, self.media(scope, revision_id)["sha256"])
 
     def require_readable(self, session, scope, revision_ids):
-        """Hold source rows through publication so deletion and publication have a defined order."""
+        """Check source access within a publication transaction."""
         ids = set(revision_ids)
+        if not ids:
+            return
         query = select(sources.c.revision, sources.c.probe, sources.c.receipt).where(
             sources.c.workspace == scope, sources.c.revision.in_(ids)).order_by(sources.c.revision).with_for_update()
         available = {r.revision for r in session.execute(query) if r.receipt and not r.probe.get("deleted")}
@@ -167,16 +169,13 @@ class EditSources:
                 or_(sources.c.digest.is_(None), sources.c.digest == digest)).values(digest=digest))
             if changed.rowcount == 0:
                 raise HTTPException(409, "此上传已绑定其他内容")
-            if self.objects:
-                self.objects.put(self.objects.source_key(row.workspace, digest), staged)
             try:
                 os.link(staged, path)
             except FileExistsError:
                 pass  # The same bytes have already been stored in this workspace.
 
     def complete(self, scope, upload_id, body, *, expected_parts=None):
-        from dovideo.infrastructure.edit_media import check_source_frame, probe_media
-        from dovideo.presentation.composition import AnalysisSettings
+        from dovideo.infrastructure.edit_media import check_source_frame, media_binaries, probe_media
 
         row = self.upload(scope, upload_id)
         receipt = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
@@ -191,13 +190,13 @@ class EditSources:
         if not row.digest or body.get("sha256", row.digest) != row.digest or body["parts"] != expected_parts:
             raise HTTPException(422, "分片凭据与已上传文件不符")
         try:
-            settings = AnalysisSettings.from_environment()
-            path = self.materialize(scope, row.digest)
-            probe = probe_media(path, ffprobe=settings.ffprobe_executable)
+            binaries = media_binaries()
+            path = self.blob(scope, row.digest)
+            probe = probe_media(path, ffprobe=binaries["ffprobe"])
             duration_limit = int(os.getenv("DOVIDEO_MAX_MEDIA_DURATION_SECONDS", "86400"))
             if not 0 < probe["duration_us"] <= duration_limit * 1_000_000 or probe["width"] * probe["height"] > 40_000_000:
                 raise HTTPException(422, "视频时长或画面尺寸超出本服务的处理范围")
-            check_source_frame(path, probe["video_index"], settings.ffmpeg_executable)
+            check_source_frame(path, probe["video_index"], binaries["ffmpeg"])
         except (ValueError, KeyError) as exc:
             raise HTTPException(422, "无法读取视频轨道或时长，请检查源文件") from exc
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:

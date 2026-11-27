@@ -353,7 +353,7 @@ class MediaCatalog:
                     source=item["source"],
                     frame=item.get("frame"),
                     path=(
-                        self.derived_path(evidence["workspace_id"], item["file"])
+                        self.derived_path(item["file"])
                         if item.get("file")
                         else None
                     ),
@@ -362,13 +362,34 @@ class MediaCatalog:
             )
         return result
 
-    def derived_path(self, workspace, relative):
-        path = self.root / relative
-        if self.sources.objects and not path.is_file():
-            self.sources.objects.fetch(f"videomind/processing/{workspace}/{relative}", path.stem, path)
-        return path
+    def pin_generation(self, scope, project):
+        """Persist even a head set changed by deleting an unrelated source."""
+        with self.write() as db:
+            self.sources.project(scope, project)
+            db.execute(select(projects.c.id).where(projects.c.id == project).with_for_update()).one()
+            _, heads, generation = self.snapshot(db, scope, project)
+            if not heads:
+                return None
+            existing = db.execute(select(records.c.id).where(records.c.id == generation)).scalar()
+            if not existing:
+                published = db.execute(select(runs).where(runs.c.id == next(iter(heads.values())))).one()
+                db.execute(
+                    insert(records).values(
+                        **record(
+                            published,
+                            "GENERATION",
+                            "manifest",
+                            {"project": project, "heads": heads},
+                            rid=generation,
+                        )
+                    )
+                )
+            return generation
 
-    def search_scope(self, scope, project, media_revision_ids=None, *, generation_id=None):
+    def derived_path(self, relative):
+        return self.root / relative
+
+    def search_scope(self, scope, project, media_revision_ids=None, *, generation_id=None, span=None):
         self.sources.project(scope, project)
         requested = set(media_revision_ids or [])
         with self.sessions() as db:
@@ -386,11 +407,15 @@ class MediaCatalog:
                     )
                 ).all()
             )
-            rows = db.execute(
-                select(records.c.body).where(
-                    records.c.workspace == scope, records.c.run.in_(selected), records.c.kind == "EVIDENCE"
+            query = select(records.c.body).where(
+                records.c.workspace == scope, records.c.run.in_(selected), records.c.kind == "EVIDENCE"
+            )
+            if span is not None:
+                query = query.where(
+                    records.c.start_us < span["end_us"],
+                    records.c.body["evidence"]["range"]["end_us"].as_integer() > span["start_us"],
                 )
-            ).scalars()
+            rows = db.execute(query).scalars()
             result = self.search_rows(rows, generation)
             for row in result:
                 row["search_spaces"] = spaces.get(row["source_generation_id"], {})

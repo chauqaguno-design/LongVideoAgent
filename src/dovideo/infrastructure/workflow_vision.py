@@ -9,7 +9,8 @@ from tempfile import TemporaryDirectory
 
 from PIL import Image
 from dovideo.application.edit_timeline import EditError
-from dovideo.application.spec_contracts import validate_contract
+from dovideo.application.workflow_identity import generation_key
+from dovideo.application.workflow_skills import skill_guidance, skill_identity, use_skill
 from dovideo.application.workflow_state import stable_id
 from dovideo.infrastructure.edit_media import probe_media
 from dovideo.infrastructure.media.source_artifacts import SourceReader
@@ -68,8 +69,6 @@ def frames_at(path, start, end, repo, row):
 
 def review_interval(repo, planner, row, key, path, mid, span, goal, *, generation=None, underlying=(), output=None):
     identity = planner.identity(vision=True)
-    if row.checkpoint.get("model_identity", identity) != identity:
-        raise EditError(409, "MODEL_CHANGED", "视觉复核应使用本任务固定的 Flash 部署")
     material = frames_at(path, span["start_us"], span["end_us"], repo, row)
     output = output or {}
     material.update(media_revision_id=mid, range=span, **output)
@@ -91,16 +90,30 @@ def review_interval(repo, planner, row, key, path, mid, span, goal, *, generatio
         "sampled sequence. For actions require multiple distinct instants showing motion or a state transition. "
         "Do not infer speech, a character name, absence over unobserved frames, or events between frames."
     )
+    if isinstance(goal, dict) and goal.get("must_exclude"):
+        system += (
+            " Check must_exclude against the sampled frames. Mark a visible excluded element CONFLICTING. "
+            "Use UNCERTAIN if the exclusion cannot be assessed from the samples."
+        )
+    skill = None
+    if row.state["phase"] == ("MATERIAL" if mid else "REVIEW"):
+        kind = "evidence-inspection" if mid else "output-review"
+        skill, _, _ = use_skill(repo, row, kind, set(), purpose="vision")
+        system += skill_guidance(skill)
+        if not mid:
+            system += " Use CONFLICTING only for a visible fact that contradicts a requirement. Cite the frames showing it."
     messages = [dict(role="system", content=system), dict(role="user", content=content)]
     reply = run_model(
         repo,
         row,
-        f"{key}:{row.checkpoint['turn']}",
+        f"{key}:{row.checkpoint.attempt.turn}",
         messages,
         [],
         planner.env,
         lambda: planner.request(messages, identity, [], repo.remaining(row)),
         model=identity["model"],
+        identity=identity,
+        snapshot={"skill": skill_identity(skill)} if skill else None,
     )
     try:
         value = json.loads(reply["choices"][0]["message"]["content"])
@@ -115,7 +128,7 @@ def review_interval(repo, planner, row, key, path, mid, span, goal, *, generatio
         reason = value["reason"]
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 2000:
             raise ValueError()
-    except (KeyError, ValueError, TypeError) as exc:
+    except (IndexError, KeyError, ValueError, TypeError) as exc:
         raise EditError(422, "INVALID_VISUAL_REPORT", "图像复核响应无有效证据位置") from exc
     with repo.edits.write() as db:
         current = repo.guard(db, row)
@@ -129,8 +142,15 @@ def review_interval(repo, planner, row, key, path, mid, span, goal, *, generatio
             adapter_fingerprint=identity["fingerprint"],
             **output,
         )
+        if skill:
+            details.update(
+                sampled_times_us=[f["actual_us"] for f in frames],
+                checked_times_us=sorted({frames[i]["actual_us"] for i in indices}),
+            )
         if mid:
-            eid = stable_id(row.id, f"{key}-evidence:{row.checkpoint['turn']}")
+            eid = stable_id(
+                row.id, generation_key(row.checkpoint, f"{key}-evidence:{row.checkpoint.attempt.turn}")
+            )
             evidence = dict(
                 evidence_id=eid,
                 workspace_id=row.workspace_id,
@@ -144,7 +164,6 @@ def review_interval(repo, planner, row, key, path, mid, span, goal, *, generatio
                 verification_protocol=material["verification_protocol"],
                 index_generation_id=generation,
             )
-            validate_contract("Evidence", evidence)
             repo.output(db, current, key + "-evidence", evidence, "EVIDENCE")
             details["evidence_id"] = eid
         return details

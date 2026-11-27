@@ -1,8 +1,0 @@
-{
-  "scope": {
-    "project_id": "00000000-0000-4000-8000-000000000001"
-  },
-  "intent": "QUESTION",
-  "message": "所有进球都出现在哪些时间段",
-  "idempotency_key": "qa-demo-0001"
-}

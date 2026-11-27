@@ -1,17 +1,44 @@
-"""Read the verified deployment capabilities without making live model requests."""
+"""Report configured capabilities and worker readiness."""
 
 import os
+import shutil
+from datetime import datetime, timezone
 
 from fastapi import Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from dovideo.infrastructure.providers.flash_preflight import capabilities
 from dovideo.infrastructure.persistence.edit_tables import jobs
+from dovideo.infrastructure.persistence.outbox_tables import outbox
 from dovideo.infrastructure.persistence.processing_tables import runs as processing
 from dovideo.infrastructure.persistence.workflow_tables import model_requests, runs as workflows
-from dovideo.infrastructure.persistence.outbox_tables import outbox
+from dovideo.infrastructure.providers.config import configured_model, model_supports_vision, model_tool_mode
+
+
+def capabilities(env):
+    config = configured_model(env)
+    configured = config is not None
+    services = {
+        "ASR": env.get("DOVIDEO_WHISPER_DIR") or env.get("DOVIDEO_WHISPER_MODEL_ROOT") or env.get("DOVIDEO_ASR_API_KEY"),
+        "OCR": env.get("DOVIDEO_PADDLE_OCR_DIR") or env.get("DOVIDEO_OCR_COMMAND") or shutil.which("tesseract"),
+        "embedding": env.get("VIDEOMIND_SEARCH_ENCODER_URL") or env.get("DOVIDEO_EMBEDDING_BASE_URL"),
+        "reranker": env.get("DOVIDEO_RERANKER_ENABLED", "").lower() == "true",
+        "FFmpeg": env.get("DOVIDEO_FFMPEG") or shutil.which("ffmpeg", path=env.get("DOVIDEO_FFMPEG_DIR")),
+    }
+    return dict(
+        general_model=config.model if config else "deepseek-flash",
+        resolved_model_version=config.resolved_model if config else "unverified",
+        checked_at=datetime.now(timezone.utc).isoformat(),
+        text=configured,
+        vision=configured and model_supports_vision(env),
+        native_tools=configured and model_tool_mode(env) == "native",
+        structured_json=configured,
+        dedicated_services=[
+            dict(name=name, configured=bool(value), verified=False, version=None)
+            for name, value in services.items()
+        ],
+    )
 
 
 def install_caps(app, require_user):

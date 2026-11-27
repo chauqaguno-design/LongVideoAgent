@@ -89,7 +89,6 @@ def source(tmp_path):
 @pytest.mark.real_media
 def test_find_second_occurrence_preview_extend_export_and_restore(tmp_path, monkeypatch, source):
     monkeypatch.setenv("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
-    monkeypatch.delenv("DOVIDEO_WORKFLOW_TEAM", raising=False)
     folder = tmp_path / "app"
     with TestClient(create_app(work_dir=folder)) as client:
         login(client, "ticket_editor")
@@ -127,6 +126,22 @@ def test_find_second_occurrence_preview_extend_export_and_restore(tmp_path, monk
         (clip,) = client.get(edited + result["revision_id"]).json()["clips"]
         assert (clip["source_start_us"], clip["source_end_us"]) == (4_000_000, 5_000_000)
         assert clip["evidence_ids"] == first["candidates"][1]["evidence_ids"]
+
+        original_three = say("剪出 0 到 1 秒、2 到 3 秒和 4 到 5 秒")
+        wait(client, original_three)
+        before = client.get(f"/v1/workflow-runs/{original_three}/result").json()
+        cut_root = f"/v1/edit-projects/{before['edit_project_id']}"
+        before_revision = client.get(f"{cut_root}/revisions/{before['revision_id']}").json()
+        refined = say("把第二段换成原片 3 到 4 秒，其他保持不变，总时长3秒", original_three)
+        wait(client, refined)
+        after = client.get(f"/v1/workflow-runs/{refined}/result").json()
+        after_revision = client.get(f"{cut_root}/revisions/{after['revision_id']}").json()
+        old, new = before_revision["clips"], after_revision["clips"]
+        assert new[0] == old[0] and new[2] == old[2]
+        assert new[1]["clip_id"] == old[1]["clip_id"] and new[1]["source_start_us"] == 3_000_000
+        assert after_revision["total_duration_us"] == 3_000_000
+        stale = say("把第二段换成原片 3 到 4 秒，其他保持不变", original_three)
+        assert wait(client, stale, "FAILED")["error"]["code"] == "REVISION_CONFLICT"
 
         final = say("前面再留两秒，然后导出", preview)
         wait(client, final)
@@ -193,3 +208,62 @@ def test_find_second_occurrence_preview_extend_export_and_restore(tmp_path, monk
         )
         view = restored.get(f"/v1/workflow-runs/{final}/conversation").json()
         assert [r["run_id"] for r in view["turns"]] == [found, preview, final]
+
+
+@pytest.mark.real_media
+def test_conversation_rehydrates_the_original_index_after_reprocessing(tmp_path, source):
+    from dovideo.application.workflow_tools import read_tool
+
+    with TestClient(create_app(work_dir=tmp_path / "app")) as client:
+        login(client, "pinned_context")
+        project = post(client, "/v1/projects", title="Original index")["project_id"]
+        mid = upload(client, project, source)
+        key = post(
+            client,
+            f"/v1/projects/{project}/conversation-runs",
+            message="哪一段说了「Ticket」？",
+            media_revision_id=mid,
+            idempotency_key="freeze-index",
+        )["run_id"]
+        state = wait(client, key)
+        workspace = state["workspace_id"]
+        repo = client.app.state.workflow_worker.repo
+        search = client.app.state.evidence_search
+        with repo.sessions() as db:
+            run = repo.readable(db, workspace, key)
+        original = run.checkpoint.spec.index_generation_id
+        evidence = state["evidence_ids"][0]
+        aid = repo.sources.media(workspace, mid)["asset_id"]
+        new = post(
+            client,
+            f"/v1/assets/{aid}/processing-runs",
+            requested_capabilities=["ocr"],
+            idempotency_key="rebuild-index",
+        )["processing_run_id"]
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            indexed = client.get(f"/v1/processing-runs/{new}").json()
+            if indexed["index_generation_id"]:
+                break
+            assert indexed["status"] != "FAILED", indexed
+            time.sleep(0.25)
+        assert indexed["index_generation_id"] and indexed["index_generation_id"] != original
+        args = dict(evidence_id=evidence, before_us=0, after_us=0)
+        result = read_tool(repo, search, run, "video.get_context_window", args)
+        assert result["excerpts"][0]["text"] == "Ticket"
+        assert result["excerpts"][0]["evidence_id"] == evidence
+        assert (
+            read_tool(
+                repo,
+                search,
+                run,
+                "video.search_evidence",
+                {
+                    "scope": run.checkpoint.spec.scope.model_dump(mode="json"),
+                    "text": "Ticket",
+                    "query_mode": "LOCAL",
+                    "top_k": 5,
+                },
+            )["index_generation_id"]
+            == original
+        )

@@ -1,0 +1,1 @@
+Use the server’s frozen base revision and target clip ID. Preserve the order, source content, audio and captions of the other clips. The coordinator checks the combined timeline before committing an edit.

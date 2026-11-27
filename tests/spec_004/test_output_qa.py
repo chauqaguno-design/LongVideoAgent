@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, insert, select
 
 from dovideo.application.edit_sources import EditSources
 from dovideo.application.edit_timeline import uid
+from dovideo.application.workflow_checkpoint import PlanAttempt
 from dovideo.application.workflow_inspections import (
     WaitInspection,
     inspection,
@@ -118,7 +119,7 @@ def inspect_frames(repo, worker, scope, project, revision, aid, case):
     )
     row = repo.claim(uid())
     repo.advance(
-        row, checkpoint=dict(revision_id=revision, export_artifact_id=aid), state=dict(status="RUNNING")
+        row, attempt=PlanAttempt(revision_id=revision, export_artifact_id=aid), state=dict(status="RUNNING")
     )
     row = repo.claim(uid())
     with pytest.raises(WaitInspection) as queued:
@@ -129,7 +130,7 @@ def inspect_frames(repo, worker, scope, project, revision, aid, case):
     result = run_inspection(repo, ColorSequenceVerifier(), worker, row, job)
     repo.advance(row, **result)
     row = repo.claim(uid())
-    outcome = row.checkpoint["inspections"][job["job_id"]]
+    outcome = row.checkpoint.context.inspections[job["job_id"]]
     repo.advance(row, state=dict(status="SUCCEEDED"))
     return outcome
 
@@ -232,16 +233,16 @@ def test_playable_wrong_event_and_shifted_caption_have_independent_results(tmp_p
     bad_id = uid()
     original = worker.artifact_record(scope, control_id)
     with edits.write() as session:
-        session.execute(insert(artifacts).values(dict(original._mapping, id=bad_id, digest="0" * 64)))
-    altered = inspect_frames(repo, worker, scope, project, revision, bad_id, "wrong-sha")
-    assert altered["status"] == "FAILED" and altered["error"]["code"] == "OUTPUT_DIGEST_CHANGED"
+        session.execute(insert(artifacts).values(dict(original._mapping, id=bad_id, kind="VALIDATION_REPORT")))
+    wrong_kind = inspect_frames(repo, worker, scope, project, revision, bad_id, "wrong-kind")
+    assert wrong_kind["status"] == "FAILED" and wrong_kind["error"]["code"] == "OUTPUT_REVISION_CHANGED"
     (tmp_path / "dual-qa.json").write_text(
         json.dumps(
             dict(
                 revision_id=revision,
                 cases=results,
                 external_calls=0,
-                rejected=[stale["error"]["code"], altered["error"]["code"]],
+                rejected=[stale["error"]["code"], wrong_kind["error"]["code"]],
                 verifier="controlled first-red/last-blue judgment on decoded output frames",
             ),
             ensure_ascii=False,

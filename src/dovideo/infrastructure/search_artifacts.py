@@ -11,36 +11,18 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from .persistence.edit_repository import EditRepository
 from .persistence.search_tables import artifacts, runs
-from .search_cleanup import scoped_write
 
 
 class SearchArtifacts:
     def __init__(self, sources):
         self.sources = sources
+        self.write = EditRepository(sources).write
         self.root = sources.root / "query-files"
 
-    @staticmethod
-    def object_key(workspace, digest):
-        return f"videomind/query-files/{workspace}/{digest}"
-
     def path(self, row):
-        path = self.root / row.workspace / row.digest
-        if self.sources.objects and not path.exists():
-            with scoped_write(self.sources, row.workspace, row.media_ids) as db:
-                if (
-                    db.scalar(
-                        select(artifacts.c.id).where(
-                            artifacts.c.workspace == row.workspace, artifacts.c.id == row.id
-                        )
-                    )
-                    is None
-                ):
-                    raise HTTPException(404, "查询文件不存在")
-                return self.sources.objects.fetch(
-                    self.object_key(row.workspace, row.digest), row.digest, path
-                )
-        return path
+        return self.root / row.workspace / row.digest
 
     def put_bytes(self, workspace, digest, data):
         directory = self.root / workspace
@@ -53,14 +35,13 @@ class SearchArtifacts:
                 os.replace(f.name, target)
             finally:
                 Path(f.name).unlink(missing_ok=True)
-        if self.sources.objects:
-            self.sources.objects.put(self.object_key(workspace, digest), target)
 
     def save(self, workspace, project, data, kind, mime, media_ids=(), *, ident=None):
         digest = hashlib.sha256(data).hexdigest()
         ident = ident or str(uuid4())
         try:
-            with scoped_write(self.sources, workspace, media_ids) as db:
+            with self.write() as db:
+                self.sources.require_readable(db, workspace, media_ids)
                 self.put_bytes(workspace, digest, data)
                 db.execute(
                     artifacts.insert().values(
@@ -135,9 +116,10 @@ class SearchArtifacts:
 
     def freeze(self, workspace, run_id, request_hash, snapshot):
         try:
-            with scoped_write(
-                self.sources, workspace, [r["media_revision_id"] for r in snapshot["requested"]]
-            ) as db:
+            with self.write() as db:
+                self.sources.require_readable(
+                    db, workspace, [r["media_revision_id"] for r in snapshot["requested"]]
+                )
                 db.execute(
                     runs.insert().values(
                         run_id=run_id,

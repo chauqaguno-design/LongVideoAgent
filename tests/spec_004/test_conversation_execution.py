@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 import pytest
 
 from dovideo.application.edit_instructions import referenced_edit, relative_window
-from dovideo.application.workflow_state import NeedsInput
-from dovideo.application.workflow_state import DEFAULT_BUDGET
+from dovideo.application.edit_timeline import EditError
+from dovideo.application.workflow_state import DEFAULT_BUDGET, NeedsInput
+from dovideo.infrastructure.providers.workflow_flash import FlashPlanner
 from dovideo.presentation.api.app import create_app
 from test_conversation_runs import login, post, source, upload, wait
 
@@ -30,10 +31,41 @@ def test_context_limits_and_reference_survive_natural_wording():
     assert referenced_edit("把这个候选剪下来，前提是他真的偷了车", candidate=True) is None
 
 
+def test_flash_planner_uses_configured_identity_and_protocol():
+    calls = []
+
+    class Transport:
+        async def post(self, url, *, headers, json, timeout):
+            calls.append((url, headers, json, timeout))
+            return {"model": "local-vlm-v1"}
+
+    env = {
+        "DOVIDEO_MODEL_BASE_URL": "http://127.0.0.1:8000/v1",
+        "DOVIDEO_MODEL_MODEL": "local-vlm",
+        "DOVIDEO_MODEL_VERSION": "local-vlm-v1",
+        "DOVIDEO_WORKFLOW_LIVE_MODEL": "1",
+    }
+    planner = FlashPlanner(env, Transport())
+    identity = planner.identity(vision=True)
+    assert identity["model"] == "local-vlm-v1" and identity["mode"] == "json"
+    assert planner.identity() == identity
+    assert planner.request([], identity, [], 1) == {"model": "local-vlm-v1"}
+    url, headers, payload, timeout = calls[0]
+    assert url.endswith("/v1/chat/completions") and headers == {} and timeout == 1
+    assert payload["model"] == "local-vlm" and payload["response_format"] == {"type": "json_object"}
+
+    env["DOVIDEO_MODEL_NATIVE_TOOLS"] = "1"
+    with pytest.raises(EditError) as changed:
+        planner.request([], identity, [], 1)
+    assert changed.value.code == "MODEL_CHANGED" and len(calls) == 1
+    tools = [{"type": "function", "function": {"name": "read_evidence"}}]
+    planner.request([], planner.identity(), tools, 1)
+    assert calls[-1][2]["tools"] == tools
+
+
 @pytest.mark.real_media
 def test_routed_visual_question_and_edit_with_unrelated_dialogue(tmp_path, monkeypatch, source):
     monkeypatch.setenv("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_TEAM", "false")
     with TestClient(create_app(work_dir=tmp_path / "app")) as client:
         login(client, "visual_route")
         project = post(client, "/v1/projects", title="画面与台词")["project_id"]
@@ -87,7 +119,7 @@ class LocalVisualProtocol:
         self.sequences = []
 
     def identity(self, *, vision=False):
-        return dict(model="local-protocol", fingerprint="fixture", mode="json")
+        return dict(model="local-protocol", fingerprint="vision-fixture" if vision else "fixture", mode="json")
 
     def request(self, dialogs, identity, tools, deadline):
         if dialogs[0]["content"].startswith("Extract editing constraints"):
@@ -96,14 +128,17 @@ class LocalVisualProtocol:
                 plan=dict(
                     query="字幕：「Ticket」",
                     must_include=[],
-                    must_exclude=[],
+                    must_exclude=["水印"],
                     order_policy="SOURCE_ORDER",
                     audio="KEEP_SOURCE",
                 ),
             )
         else:
             content = dialogs[1]["content"]
-            times = json.loads(content[0]["text"])["times_us"]
+            inputs = json.loads(content[0]["text"])
+            if isinstance(inputs["goal"], dict):
+                assert inputs["goal"]["must_exclude"] == ["水印"]
+            times = inputs["times_us"]
             pictures = [part["image_url"]["url"] for part in content[1:]]
             assert len(times) == len(pictures) and times == sorted(set(times))
             assert all(image.startswith("data:image/jpeg;base64,") for image in pictures)
@@ -121,7 +156,6 @@ class LocalVisualProtocol:
 
 @pytest.mark.real_media
 def test_bounded_inspection_supplies_visual_evidence_before_edit(tmp_path, monkeypatch, source):
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_TEAM", "false")
     with TestClient(create_app(work_dir=tmp_path / "app")) as client:
         provider = LocalVisualProtocol()
         client.app.state.workflow_worker.planner = provider
@@ -130,7 +164,7 @@ def test_bounded_inspection_supplies_visual_evidence_before_edit(tmp_path, monke
         mid = upload(client, project, source)
         for editing, text in [
             (False, "核实说「Ticket」时画面是否变化"),
-            (True, "先核实说「Ticket」时画面有没有变化，确认后把对应片段剪出来"),
+            (True, "先核实说「Ticket」时画面有没有变化，确认后把对应片段剪出来，排除水印"),
         ]:
             provider.sequences.clear()
             key = post(

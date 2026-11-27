@@ -128,7 +128,7 @@ def test_visual_cache_rebinds_frames_and_invalidates_only_affected_stage(tmp_pat
         worker.perform(run)
         assert catalog.visual_usage(scope, run.id)["model_calls"] == expected_calls
         artifact = next(r for r in catalog.entries(run, "ARTIFACT") if r.unit == "visual-window:0")
-        report = json.loads(catalog.derived_path(scope, artifact.body["file"]).read_text(encoding="utf8"))
+        report = json.loads(catalog.derived_path(artifact.body["file"]).read_text(encoding="utf8"))
         frames = {r.id for r in catalog.entries(run, "ARTIFACT") if "frame" in r.body}
         evidence = next(
             r.body for r in catalog.entries(run, "OBSERVATION") if r.body["modality"] == "VISUAL"
@@ -138,6 +138,8 @@ def test_visual_cache_rebinds_frames_and_invalidates_only_affected_stage(tmp_pat
 
     first = upload("red")
     original, _ = build(first, "initial", 1)
+    assert calls[0] == list(original["frame_aliases"])
+    assert set(original["response"][0]["frames"]) == set(original["frame_aliases"].values())
     cache_dir = catalog.root / first.id / "cache"
     cache_times = {f: f.stat().st_mtime_ns for f in cache_dir.glob("*.json")}
     if os.environ.get("DOVIDEO_WHISPER_DIR"):

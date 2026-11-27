@@ -1,7 +1,6 @@
 """Durable media processing runs, coverage and evidence records."""
 
 from alembic import op
-from dovideo.infrastructure.persistence.migrations import create_or_adopt_table
 from dovideo.infrastructure.persistence.processing_tables import define_v1
 
 revision = "0007_processing"
@@ -10,7 +9,7 @@ branch_labels = depends_on = None
 
 
 def upgrade():
-    define_v1(create_or_adopt_table)
+    define_v1(op.create_table)
 
 
 def downgrade():

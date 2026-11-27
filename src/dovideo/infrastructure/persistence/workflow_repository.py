@@ -1,5 +1,6 @@
 """A checkpoint, its event cursor, and optional tool receipt commit atomically."""
 
+import os
 import time
 from copy import deepcopy
 from fastapi import HTTPException
@@ -7,6 +8,11 @@ from sqlalchemy import and_, insert, select, update
 
 from dovideo.application.edit_timeline import EditError, missing, timestamp, uid
 from dovideo.application.workflow_routing import candidate_reference
+from dovideo.application.workflow_checkpoint import (
+    Checkpoint, ClipRepair, ContextManifest, PlanAttempt, RepairHistory, RunSpec,
+)
+from dovideo.application.workflow_context import remember_evidence, remember_outputs
+from dovideo.application.workflow_identity import generation_key, workflow_version
 from dovideo.application.workflow_state import (
     DEFAULT_BUDGET,
     RUNNABLE,
@@ -17,12 +23,10 @@ from dovideo.application.workflow_state import (
     public_error,
     require_version,
     stable_id,
-    task_label,
 )
 from .edit_repository import digest, one, owned, project_view
 from .edit_tables import projects, revisions
-from .workflow_tables import calls, documents, events, model_requests, runs, tasks
-from .workflow_team import claim_stage, create_team, finish_stage, stage_row, write_task
+from .workflow_tables import calls, documents, events, model_requests, runs
 from .work_outbox import emit
 from .workflow_clock import db_now
 
@@ -73,9 +77,13 @@ class WorkflowRepository:
         """Publish bounded execution metadata without copying prompts, tool arguments or source dialogue."""
         origin = row if origin is None else origin
         phase = origin.state["phase"]
-        payload = dict(activity=activity, phase=phase, fencing_token=origin.fence, **metadata)
-        if origin.checkpoint["team"]:
-            payload["task_id"] = stable_id(origin.id, task_label(phase, origin.checkpoint["turn"]))
+        payload = dict(
+            activity=activity,
+            phase=phase,
+            fencing_token=origin.fence,
+            **workflow_version(origin.checkpoint),
+            **metadata,
+        )
         self._event(db, state, "PROGRESS", payload)
         state["state_version"] += 1
         db.execute(update(runs).where(runs.c.id == row.id).values(state=state))
@@ -101,24 +109,30 @@ class WorkflowRepository:
                 raise missing()
         return {"project_id": project, "media_revision_ids": mids}
 
-    def create(self, workspace, body, *, team=False, search_request=None, conversation=None):
+    def create(self, workspace, body, *, search_request=None, conversation=None):
         project = body["scope"]["project_id"]
 
         def save(db):
             scope = self._scope(workspace, body["scope"])
             run_id, now = uid(), db_now(db)
             state = new_state(run_id, workspace, project, body.get("budget", dict(DEFAULT_BUDGET)))
-            cp = dict(
-                intent=body["intent"], message=body["message"], scope=scope, turn=0, team=team, created=now
+            cp = Checkpoint(
+                spec=RunSpec(
+                    scope=scope, message=body["message"], created=now, conversation=conversation,
+                    search_request=dict(search_request, scope=scope) if search_request is not None else None,
+                    stage_model_limit=int(os.getenv("DOVIDEO_WORKFLOW_STAGE_MAX_MODEL_CALLS", "0")) or None,
+                ),
+                attempt=PlanAttempt(intent=body["intent"]),
+                context=ContextManifest(),
+                repair=RepairHistory(
+                    repair_limit=max(0, min(2, int(os.getenv("DOVIDEO_WORKFLOW_REPAIR_LIMIT", "2"))))
+                ),
             )
-            if conversation is not None:
-                if parent := conversation.get("parent_run_id"):
-                    previous = self.readable(db, workspace, parent)
-                    if previous.project_id != project or previous.checkpoint["scope"] != scope:
-                        raise missing()
-                cp["conversation"] = conversation
+            if conversation and (parent := conversation.get("parent_run_id")):
+                previous = self.readable(db, workspace, parent)
+                if previous.project_id != project or previous.checkpoint.spec.scope != cp.spec.scope:
+                    raise missing()
             if search_request is not None:
-                cp["search_request"] = dict(search_request, scope=scope)
                 media_ids = scope["media_revision_ids"]
                 if search_request["query_mode"] == "FIRST" and len(media_ids) > 1:
                     raise EditError(422, "SEARCH_SCOPE", "请选定单个视频后查找首次出现位置")
@@ -135,12 +149,9 @@ class WorkflowRepository:
                 edit = self.edits.get(
                     projects, workspace, body["edit_project_id"], project_view, project_id=project
                 )
-                cp.update(
-                    edit_id=edit["edit_project_id"],
-                    base=edit["head_revision"],
-                    base_id=edit["head_revision_id"],
-                )
-                timeline = self.edits.get(revisions, workspace, cp["base_id"], lambda r: r.snapshot)
+                cp.attempt.edit_id = edit["edit_project_id"]
+                cp.attempt.base, cp.attempt.base_id = edit["head_revision"], edit["head_revision_id"]
+                timeline = self.edits.get(revisions, workspace, cp.attempt.base_id, lambda r: r.snapshot)
                 if any(
                     clip["media_revision_id"] not in scope["media_revision_ids"] for clip in timeline["clips"]
                 ):
@@ -154,7 +165,7 @@ class WorkflowRepository:
                     .with_for_update(),
                 )
                 self.sources.require_readable(
-                    db, workspace, previous.checkpoint["scope"]["media_revision_ids"]
+                    db, workspace, previous.checkpoint.spec.scope.media_revision_ids
                 )
                 before = deepcopy(previous.state)
                 require_version(before, target["expected_state_version"])
@@ -163,7 +174,6 @@ class WorkflowRepository:
                 before.update(
                     status="SUPERSEDED", superseded_by_run_id=run_id, pending_job_ids=[], awaiting_input=None
                 )
-                finish_stage(db, previous, before["phase"], before["phase"], "SUPERSEDED", [])
                 self._update(db, previous, before, previous.checkpoint, "STATUS")
             db.execute(
                 insert(runs).values(
@@ -179,8 +189,6 @@ class WorkflowRepository:
                     checkpoint=cp,
                 )
             )
-            if team:
-                create_team(db, run_id, workspace, body["intent"])
             self._event(db, state, "STATUS", dict(status="QUEUED", phase="PLAN"))
             db.execute(update(runs).where(runs.c.id == run_id).values(state=state))
             return state
@@ -196,12 +204,34 @@ class WorkflowRepository:
     def readable(self, db, workspace, run_id, *, lock=False):
         query = owned(runs, workspace, run_id)
         row = one(db, query.with_for_update() if lock else query)
-        self.sources.require_readable(db, workspace, row.checkpoint["scope"]["media_revision_ids"])
+        self.sources.require_readable(db, workspace, row.checkpoint.spec.scope.media_revision_ids)
         return row
 
     def get(self, workspace, run_id):
         with self.sessions() as db:
             return self.readable(db, workspace, run_id).state
+
+    def harness_view(self, workspace, run_id, offset):
+        with self.sessions() as db:
+            row = self.readable(db, workspace, run_id)
+            cp = row.checkpoint
+            attempt = cp.attempt
+            refs = list(cp.context.references.values())
+            return dict(
+                run_id=row.id,
+                harness_version=1,
+                turn=attempt.turn,
+                plan_generation=attempt.plan_generation,
+                repair_count=cp.repair.repair_count,
+                repair_limit=cp.repair.repair_limit,
+                index_generation_id=cp.spec.index_generation_id,
+                revision_id=attempt.revision_id,
+                shot_plan_id=attempt.shot_plan_id,
+                references=refs[offset : offset + 32],
+                reference_count=len(refs),
+                next_offset=offset + 32 if len(refs) > offset + 32 else None,
+                report_ids=[key for key in (attempt.preview_review_id, attempt.export_review_id) if key],
+            )
 
     def history(self, workspace, project, cursor, limit):
         def visible(row):
@@ -221,7 +251,7 @@ class WorkflowRepository:
 
         def save(db):
             row = self.readable(db, workspace, run_id, lock=True)
-            state, cp = deepcopy(row.state), deepcopy(row.checkpoint)
+            state, cp = deepcopy(row.state), row.checkpoint
             deadline, kind = row.deadline, "STATUS"
             if "expected_state_version" in body:
                 require_version(state, body["expected_state_version"])
@@ -240,7 +270,7 @@ class WorkflowRepository:
                     .where(model_requests.c.run_id == run_id, model_requests.c.status == "PENDING")
                     .limit(1)
                 )
-                inspecting = any(job["status"] == "RUNNING" for job in cp.get("inspections", {}).values())
+                inspecting = any(job["status"] == "RUNNING" for job in cp.context.inspections.values())
                 if (pending or inspecting) and row.lease > db_now(db):
                     self.trace(db, row, state, "cancel.requested")
                 else:
@@ -248,50 +278,29 @@ class WorkflowRepository:
                 return state
             elif action == "budget":
                 budget_change(state, body["new_limits"])
-                deadline = cp["created"] + body["new_limits"]["deadline_seconds"]
+                deadline = cp.spec.created + body["new_limits"]["deadline_seconds"]
             else:
                 if row.status not in ("AWAITING_INPUT", "FAILED"):
                     raise EditError(409, "INVALID_RUN_STATE", "此任务没有等待补充或重试")
                 awaiting = state["awaiting_input"]
                 if awaiting and awaiting["kind"] != "BUDGET":
-                    if "conversation" in cp:
-                        cp.setdefault("clarifications", []).append(
-                            dict(question=awaiting["question"], reply=body["message"])
-                        )
-                        choices = cp.get("conversation_candidates", [])
-                        if choices:
-                            number = candidate_reference(body["message"])
-                            if number == 0 and len(choices) == 1:
-                                number = 1
-                            if number is not None:
-                                if not 1 <= number <= len(choices):
-                                    raise EditError(
-                                        422, "INVALID_CANDIDATE", "请选择本轮清单中的一个候选编号"
-                                    )
-                                cp["selected_candidate"] = choices[number - 1]
-                    if cp["team"]:
-                        if cp["turn"] >= 3:
-                            raise EditError(409, "REPLAN_LIMIT", "该团队运行已达到调整次数上限，请创建新任务")
-                        finish_stage(db, row, state["phase"], state["phase"], "SUPERSEDED", [])
-                        create_team(db, row.id, workspace, cp["intent"], cp["turn"] + 1)
-                    cp.update(turn=cp["turn"] + 1, clarification=body["message"])
-                    if cp.get("revision_id"):
-                        current = one(db, owned(revisions, workspace, cp["revision_id"]))
-                        cp.update(base=current.number, base_id=current.id)
-                    for key in (
-                        "dialogs",
-                        "model_round",
-                        "format_repaired",
-                        "native_call_ids",
-                        "revision_id",
-                        "render_job_id",
-                        "preview_artifact_id",
-                        "qa_id",
-                        "export_job_id",
-                        "export_artifact_id",
-                        "export_qa_id",
-                    ):
-                        cp.pop(key, None)
+                    old = cp.attempt
+                    new = old.after_clarification(body["message"])
+                    if cp.spec.conversation is not None:
+                        new.clarifications.append(dict(question=awaiting["question"], reply=body["message"]))
+                        choices = old.conversation_candidates or []
+                        number = candidate_reference(body["message"]) if choices else None
+                        if number == 0 and len(choices) == 1:
+                            number = 1
+                        if number is not None:
+                            if not 1 <= number <= len(choices):
+                                raise EditError(422, "INVALID_CANDIDATE", "请选择清单中的一个候选编号")
+                            new.selected_candidate = choices[number - 1]
+                    if old.revision_id:
+                        current = one(db, owned(revisions, workspace, old.revision_id))
+                        new.base, new.base_id = current.number, current.id
+                    cp.attempt = new
+                    cp.spec = cp.spec.model_copy(update={"brief": None})
                     state.update(phase="PLAN", pending_job_ids=[], result_artifact_id=None, evidence_ids=[])
                 state.update(status="QUEUED", error=None, awaiting_input=None)
             payload = dict(phase=state["phase"], status=state["status"], action=action)
@@ -304,7 +313,6 @@ class WorkflowRepository:
 
     def cancelled(self, db, row, state):
         state.update(status="CANCELLED", awaiting_input=None, pending_job_ids=[])
-        finish_stage(db, row, state["phase"], state["phase"], "CANCELLED", [])
         self._update(db, row, state, row.checkpoint, "CANCELLED")
 
     def stopped(self, claim):
@@ -331,7 +339,7 @@ class WorkflowRepository:
                 return None
             try:
                 self.sources.require_readable(
-                    db, row.workspace_id, row.checkpoint["scope"]["media_revision_ids"]
+                    db, row.workspace_id, row.checkpoint.spec.scope.media_revision_ids
                 )
             except HTTPException:
                 state = deepcopy(row.state)
@@ -340,25 +348,22 @@ class WorkflowRepository:
                     pending_job_ids=[],
                     error=public_error("SOURCE_REVOKED", "源素材已不可用"),
                 )
-                finish_stage(db, row, state["phase"], state["phase"], "FAILED", [])
                 self._update(db, row, state, row.checkpoint, "FAILED")
                 return None
             if row.deadline <= now:
                 state = deepcopy(row.state)
                 state.update(status="FAILED", error=public_error("DEADLINE_EXCEEDED", "任务已到达时间上限"))
-                finish_stage(db, row, state["phase"], state["phase"], "FAILED", [])
                 self._update(db, row, state, row.checkpoint, "FAILED")
                 return None
-            checkpoint = deepcopy(row.checkpoint)
-            checkpoint["lease_owner"] = worker
+            checkpoint = row.checkpoint
+            checkpoint.attempt.lease_owner = worker
             if row.lease:
-                checkpoint["lease_failures"] = checkpoint.get("lease_failures", 0) + 1
-            if checkpoint.get("lease_failures", 0) > 3:
+                checkpoint.attempt.lease_failures += 1
+            if checkpoint.attempt.lease_failures > 3:
                 state = deepcopy(row.state)
                 state.update(
                     status="FAILED", error=public_error("LEASE_RETRY_EXHAUSTED", "连续三次接管后仍未完成")
                 )
-                finish_stage(db, row, state["phase"], state["phase"], "FAILED", [])
                 self._update(db, row, state, checkpoint, "FAILED")
                 return None
             fence = row.fence + 1
@@ -373,14 +378,6 @@ class WorkflowRepository:
                 .where(runs.c.id == row.id)
                 .values(lease=expiry, fence=fence, status=state["status"], state=state, checkpoint=checkpoint)
             )
-            if row.checkpoint["team"]:
-                try:
-                    claim_stage(db, row, worker, expiry, fence)
-                except EditError as exc:
-                    state.update(status="FAILED", pending_job_ids=[], error=public_error(exc.code, str(exc)))
-                    finish_stage(db, row, state["phase"], state["phase"], "FAILED", [])
-                    self._update(db, row, state, checkpoint, "FAILED")
-                    return None
             return one(db, select(runs).where(runs.c.id == row.id))
 
     def guard(self, db, claim):
@@ -388,14 +385,13 @@ class WorkflowRepository:
         if (
             not row
             or row.fence != claim.fence
-            or row.checkpoint.get("lease_owner") != claim.checkpoint.get("lease_owner")
             or row.status not in RUNNABLE
             or row.state["cancel_requested_at"]
             or min(row.lease, row.deadline) <= db_now(db)
         ):
             raise StaleLease()
         try:
-            self.sources.require_readable(db, row.workspace_id, row.checkpoint["scope"]["media_revision_ids"])
+            self.sources.require_readable(db, row.workspace_id, row.checkpoint.spec.scope.media_revision_ids)
         except HTTPException as exc:
             raise StaleLease() from exc
         return row
@@ -409,61 +405,102 @@ class WorkflowRepository:
             row = self.guard(db, claim)
             expiry = min(row.deadline, db_now(db) + 60)
             db.execute(update(runs).where(runs.c.id == row.id).values(lease=expiry))
-            if row.checkpoint["team"]:
-                from dovideo.application.workflow_state import utc
-
-                stage = stage_row(db, row, row.state["phase"])
-                write_task(db, stage, lease_until=utc(expiry))
 
     def writer_guard(self, db, claim, phase):
         row = self.guard(db, claim)
         if phase not in ("COMMIT", "RENDER") or row.state["phase"] != phase:
             raise EditError(403, "WRITER_REQUIRED", "当前阶段没有时间线或渲染写权限")
-        if row.checkpoint["team"]:
-            card = stage_row(db, row, phase).body
-            if (
-                card["role"] != "COORDINATOR"
-                or card["claimed_by"] != row.checkpoint.get("lease_owner")
-                or card["fencing_token"] != claim.fence
-                or card["status"] != "RUNNING"
-            ):
-                raise EditError(403, "WRITER_REQUIRED", "需要当前协调器的写租约")
 
     def output(self, db, row, label, body, kind="REPORT"):
-        key = stable_id(row.id, f"{label}:{row.checkpoint['turn']}")
-        if not db.execute(select(documents.c.id).where(documents.c.id == key)).scalar():
+        key = stable_id(row.id, generation_key(row.checkpoint, f"{label}:{row.checkpoint.attempt.turn}"))
+        existing = db.execute(select(documents.c.body).where(documents.c.id == key)).first()
+        if existing is None:
             db.execute(insert(documents).values(id=key, run_id=row.id, kind=kind, body=body))
+        elif digest(existing.body) != digest(body):
+            raise EditError(409, "DOCUMENT_INPUT_CONFLICT", "当前代次已经保存了此阶段的结果")
         return key
 
     def checkpoint_inspection(self, db, row, checkpoint, job):
         db.execute(update(runs).where(runs.c.id == row.id).values(checkpoint=checkpoint))
         self.trace(db, row, deepcopy(row.state), "inspection.started", job_id=job["job_id"])
 
-    def advance(self, claim, **outcome):
+    def pin_skill(self, claim, slot, load):
         with self.edits.write() as db:
             row = self.guard(db, claim)
-            state, cp = deepcopy(row.state), deepcopy(row.checkpoint)
-            if outcome.get("sleep"):
+            cp = row.checkpoint
+            skills = cp.attempt.skill_snapshots
+            if slot not in skills:
+                from dovideo.application.workflow_skills import skill_identity
+
+                skills[slot] = load()
+                db.execute(update(runs).where(runs.c.id == row.id).values(checkpoint=cp))
+                self.trace(db, row, deepcopy(row.state), "skill.loaded", skill=skill_identity(skills[slot]))
+            snapshot = skills[slot]
+        # The current stage may compile a shot plan before it takes another claim.
+        claim.checkpoint.attempt.skill_snapshots[slot] = snapshot
+        return snapshot
+
+    def record_activity(self, claim, activity, **metadata):
+        with self.edits.write() as db:
+            row = self.guard(db, claim)
+            self.trace(db, row, deepcopy(row.state), activity, **metadata)
+
+    def advance(self, claim, *, attempt: PlanAttempt | None = None, spec: RunSpec | None = None,
+                references=None, inspection=None, processing_job_ids=(), repair: ClipRepair | None = None,
+                state=None, docs=None, event="PROGRESS", payload=None, sleep=False, inspection_finished=None):
+        with self.edits.write() as db:
+            row = self.guard(db, claim)
+            updates = state or {}
+            state, cp = deepcopy(row.state), row.checkpoint
+            if sleep:
                 db.execute(update(runs).where(runs.c.id == row.id).values(lease=0, ready_at=db_now(db) + 1))
                 return
-            cp.update(outcome.get("checkpoint", {}))
-            if job_id := outcome.get("inspection_finished"):
-                emit(db, uid(), row.workspace_id, job_id, "inspection.finished")
-            cp.pop("lease_failures", None)
-            state.update(outcome.get("state", {}))
-            doc_ids = []
-            for label, body in outcome.get("docs", {}).items():
+            if spec is not None:
+                cp.spec = spec
+            if attempt is not None:
+                # The claim can predate a skill pin. Apply only fields produced by this stage.
+                for name in attempt.model_fields_set:
+                    setattr(cp.attempt, name, getattr(attempt, name))
+            if references:
+                cp.context.references.update(references)
+            if inspection:
+                cp.context.inspections[inspection["job_id"]] = inspection
+            if processing_job_ids:
+                cp.context.processing_job_ids = list(dict.fromkeys([*cp.context.processing_job_ids, *processing_job_ids]))
+            if inspection_finished:
+                emit(db, uid(), row.workspace_id, inspection_finished, "inspection.finished")
+            cp.attempt.lease_failures = 0
+            state.update(updates)
+            if updates.get("evidence_ids"):
+                cp.context.references = remember_evidence(
+                    self, row, cp.context.references, state["evidence_ids"], row.state["phase"], session=db
+                )
+            for label, body in (docs or {}).items():
                 key = self.output(db, row, label, body, "QUERY_RESULT" if label == "result" else "REPORT")
-                cp[label + "_id"] = key
-                doc_ids.append(key)
                 if label == "result":
                     state["result_artifact_id"] = key
-            if cp["team"] and not row.checkpoint["team"]:
-                create_team(db, row.id, row.workspace_id, cp["intent"], cp["turn"])
-            elif cp["team"]:
-                finish_stage(db, row, row.state["phase"], state["phase"], state["status"], doc_ids)
-            payload = dict(phase=state["phase"], status=state["status"], **(outcome.get("payload") or {}))
-            self._update(db, row, state, cp, outcome.get("event", "PROGRESS"), payload)
+                else:
+                    setattr(cp.attempt, label + "_id", key)
+            remember_outputs(cp, row.state["phase"])
+            if repair is not None:
+                old = cp.attempt
+                cp.repair.lineage.append(dict(
+                    plan_generation=old.plan_generation, review_report_id=old.preview_review_id,
+                    shot_plan_id=old.shot_plan_id, proposal_id=old.proposal_id,
+                    revision_id=old.revision_id, preview_artifact_id=old.preview_artifact_id,
+                ))
+                cp.repair.signatures.append(repair.signature)
+                cp.repair.rejected_candidates = repair.rejected_candidates
+                cp.repair.repair_count += 1
+                cp.attempt = repair.attempt
+                state.update(result_artifact_id=None, pending_job_ids=[])
+            payload = dict(
+                phase=state["phase"],
+                status=state["status"],
+                **workflow_version(cp),
+                **(payload or {}),
+            )
+            self._update(db, row, state, cp, event, payload)
 
     def invoke(self, claim, key, name, arguments, execute):
         """Persist intent before execution. Effect adapters reuse this stable key on recovery."""
@@ -474,6 +511,16 @@ class WorkflowRepository:
             if old and (old.name != name or old.input_digest != digest(arguments)):
                 raise EditError(409, "TOOL_ARGUMENT_CONFLICT", "工具重试参数与已登记请求不符")
             if old and old.response is not None:
+                self.trace(
+                    db,
+                    row,
+                    deepcopy(row.state),
+                    "tool.replayed",
+                    tool=name,
+                    call_key=key,
+                    attempt=old.attempts,
+                    reason="stored_tool_result",
+                )
                 return old.response
             state = deepcopy(row.state)
             usage = state["budget_usage"]
@@ -498,6 +545,8 @@ class WorkflowRepository:
             metadata = {
                 k: result[k] for k in ("render_job_id", "revision_id", "edit_project_id") if k in result
             }
+            if "replayed" in result:
+                metadata["receipt_replayed"] = result["replayed"]
             self.trace(
                 db,
                 row,
@@ -523,19 +572,18 @@ class WorkflowRepository:
             raise EditError(409, "CURSOR_EXPIRED", "事件游标已失效，请重新读取任务快照")
         return n
 
-    def page(self, workspace, run_id, table, cursor, limit):
-        order = table.c.position if table is tasks else table.c.seq
+    def page(self, workspace, run_id, cursor, limit):
         index = int(cursor) if cursor and cursor.isascii() and cursor.isdigit() and len(cursor) < 17 else -1
         if cursor and index < 0:
             raise EditError(422, "INVALID_CURSOR", "无效分页游标")
         with self.sessions() as db:
             self.readable(db, workspace, run_id)
             rows = db.execute(
-                select(table).where(table.c.run_id == run_id, order > index).order_by(order).limit(limit + 1)
+                select(events).where(events.c.run_id == run_id, events.c.seq > index).order_by(events.c.seq).limit(limit + 1)
             ).all()
         return dict(
             items=[r.body for r in rows[:limit]],
-            next_cursor=str(rows[limit - 1]._mapping[order]) if len(rows) > limit else None,
+            next_cursor=str(rows[limit - 1].seq) if len(rows) > limit else None,
         )
 
     def document(self, workspace, key, *, session=None):
@@ -548,5 +596,5 @@ class WorkflowRepository:
             .where(runs.c.workspace_id == workspace, documents.c.id == key)
         ).first()
         if row:
-            self.sources.require_readable(session, workspace, row.checkpoint["scope"]["media_revision_ids"])
+            self.sources.require_readable(session, workspace, row.checkpoint.spec.scope.media_revision_ids)
         return row

@@ -6,7 +6,6 @@ from hashlib import sha256
 import hmac
 import json
 import logging
-import os
 import time
 from urllib.parse import urlencode
 
@@ -15,9 +14,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from dovideo.application.conversation_runs import candidate_cards, route_turn
 from dovideo.application.edit_timeline import EditError, uid
+from dovideo.application.stages import StageDeps
+from dovideo.application.stages.edit import run_edit
+from dovideo.application.stages.material import run_material
+from dovideo.application.stages.plan import run_plan
+from dovideo.application.stages.review import run_review
+from dovideo.application.workflow_checkpoint import PlanAttempt
 from dovideo.application.workflow_state import NeedsInput, public_error, utc
-from dovideo.application.workflow_steps import WorkflowSteps
-from dovideo.application.workflow_roles import review_handoff
 from dovideo.application.workflow_inspections import WaitInspection, pending_inspection, run_inspection
 from dovideo.infrastructure.providers.workflow_flash import FlashPlanner
 from .workflow_repository import StaleLease
@@ -35,10 +38,6 @@ class WorkflowWorker:
         self.planner = FlashPlanner()
         self.worker_id = uid()
         self.task = None
-
-    @property
-    def team_enabled(self):
-        return os.getenv("DOVIDEO_WORKFLOW_TEAM", "").lower() in ("1", "true")
 
     async def start(self):
         self.stop_event = asyncio.Event()
@@ -73,15 +72,16 @@ class WorkflowWorker:
                 pass
 
     def run_stage(self, claim):
+        started = time.monotonic()
         planner = self.planner
-        if "conversation" in claim.checkpoint:
-            route = claim.checkpoint.get("route_decision") or {}
+        if claim.checkpoint.spec.conversation is not None:
+            route = claim.checkpoint.attempt.route_decision or {}
             enabled = planner.env.get(
                 "DOVIDEO_CHAT_LIVE_MODEL", planner.env.get("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
             )
             funded = claim.state["budget_usage"]["limits"]["max_cost_microunits"] > 0
             needs_model = (
-                claim.checkpoint["intent"] == "AUTO"
+                claim.checkpoint.attempt.intent == "AUTO"
                 or "INSPECT" in route.get("plan", [])
                 or route.get("source") == "MODEL"
             )
@@ -89,26 +89,41 @@ class WorkflowWorker:
             planner.env = dict(
                 planner.env, DOVIDEO_WORKFLOW_LIVE_MODEL=enabled if funded and needs_model else "0"
             )
-        service = WorkflowSteps(
+        deps = StageDeps(
             self.repo,
             getattr(self.app.state, "evidence_search", None),
             planner,
             getattr(self.app.state, "edit_worker", None),
         )
         try:
-            if claim.checkpoint["intent"] == "AUTO":
+            if claim.checkpoint.attempt.intent == "AUTO":
                 outcome = route_turn(self.repo, planner, claim)
             elif job := pending_inspection(claim):
-                outcome = run_inspection(self.repo, planner, service.render_worker, claim, job)
+                outcome = run_inspection(self.repo, planner, deps.render_worker, claim, job)
             else:
-                outcome = getattr(service, claim.state["phase"].lower())(claim)
-                outcome = review_handoff(service, claim, outcome)
+                match claim.state["phase"]:
+                    case "PLAN":
+                        outcome = run_plan(deps, claim)
+                    case "MATERIAL":
+                        outcome = run_material(deps, claim)
+                    case "PROPOSE" | "COMMIT" | "RENDER":
+                        outcome = run_edit(deps, claim)
+                    case "REVIEW":
+                        outcome = run_review(deps, claim)
+                    case phase:
+                        raise KeyError(phase)
             result = outcome.get("docs", {}).get("result", {})
-            if "conversation" in claim.checkpoint and "claims" in result:
-                (media_id,) = claim.checkpoint["scope"]["media_revision_ids"]
-                outcome.setdefault("checkpoint", {})["conversation_candidates"] = candidate_cards(
-                    self.repo, claim.workspace_id, result["claims"], media_id
+            if claim.checkpoint.spec.conversation is not None and "claims" in result:
+                (media_id,) = claim.checkpoint.spec.scope.media_revision_ids
+                attempt = outcome.get("attempt") or PlanAttempt()
+                attempt.conversation_candidates = candidate_cards(
+                    self.repo,
+                    claim.workspace_id,
+                    result["claims"],
+                    media_id,
+                    generation=claim.checkpoint.spec.index_generation_id,
                 )
+                outcome["attempt"] = attempt
         except WaitInspection as wait:
             outcome = wait.outcome
         except StaleLease:
@@ -134,9 +149,26 @@ class WorkflowWorker:
                 event="FAILED",
             )
         try:
+            if not outcome.get("sleep"):
+                payload = outcome.get("payload") or {}
+                outcome["payload"] = dict(
+                    payload,
+                    stage=claim.state["phase"],
+                    stage_latency_ms=int((time.monotonic() - started) * 1000),
+                )
             self.repo.advance(claim, **outcome)
         except StaleLease:
             self.repo.stopped(claim)
+        except (EditError, HTTPException) as exc:
+            code = exc.code if isinstance(exc, EditError) else "RESOURCE_UNAVAILABLE"
+            try:
+                self.repo.advance(
+                    claim,
+                    state=dict(status="FAILED", pending_job_ids=[], error=public_error(code, str(exc))),
+                    event="FAILED",
+                )
+            except StaleLease:
+                self.repo.stopped(claim)
 
     def artifact(self, workspace, key, request):
         row = self.repo.document(workspace, key)

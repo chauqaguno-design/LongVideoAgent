@@ -4,11 +4,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from dovideo.application.spec_contracts import validate_contract
 from dovideo.application.edit_timeline import missing
 from dovideo.infrastructure.edit_captions import parse_srt
 from dovideo.infrastructure.persistence.processing_worker import ProcessingWorker
 from dovideo.infrastructure.persistence.source_tables import sources as sources_table
+from .schemas import CancelRequest, ProcessingCreate
 
 
 def install_processing(app, require_user):
@@ -25,7 +25,7 @@ def install_processing(app, require_user):
             or row.body["artifact"]["media_revision_id"] != revision
         ):
             raise missing()
-        return parse_srt(catalog.derived_path(workspace, row.body["file"]).read_text(encoding="utf-8"))
+        return parse_srt(catalog.derived_path(row.body["file"]).read_text(encoding="utf-8"))
 
     app.state.edit_worker.repo.resolve_track = resolve_track
     api = APIRouter(prefix="/v1")
@@ -33,15 +33,8 @@ def install_processing(app, require_user):
     def scope(user=Depends(require_user)):
         return sources.workspace(user)
 
-    def checked(schema, body):
-        try:
-            validate_contract(schema, body)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
     @api.post("/assets/{asset_id}/processing-runs", status_code=202)
-    def enqueue(asset_id: UUID, body: dict, workspace=Depends(scope)):
-        checked("ProcessingCreate", body)
+    def enqueue(asset_id: UUID, body: ProcessingCreate, workspace=Depends(scope)):
         return worker.enqueue(workspace, str(asset_id), body)
 
     @api.get("/assets/{asset_id}/processing-runs")
@@ -62,8 +55,7 @@ def install_processing(app, require_user):
         return catalog.visual_usage(workspace, str(processing_run_id))
 
     @api.post("/processing-runs/{processing_run_id}/cancel", status_code=202)
-    def cancel(processing_run_id: UUID, body: dict, workspace=Depends(scope)):
-        checked("CancelRequest", body)
+    def cancel(processing_run_id: UUID, body: CancelRequest, workspace=Depends(scope)):
         return catalog.cancel(workspace, str(processing_run_id))
 
     @api.get("/assets/{asset_id}/coverage")

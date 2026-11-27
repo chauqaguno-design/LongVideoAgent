@@ -1,18 +1,17 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { defaultProfile, listAll, makeCommand, request, uploadAsset } from './editApi.js'
+import { defaultProfile, listAll, makeCommand, uploadAsset } from './editApi.js'
 import EditTimeline from './EditTimeline.vue'
 import ProcessingPanel from './ProcessingPanel.vue'
 import SearchPanel from './SearchPanel.vue'
 import WorkflowPanel from './WorkflowPanel.vue'
 
-const props = defineProps({ projectId: String, initialEdit: String, library: Array })
+const props = defineProps({ projectId: String, initialEdit: String })
 const emit = defineEmits(['selected'])
 const assets = ref([])
 const edits = ref([])
 const editId = ref('')
 const title = ref('')
-const legacyId = ref('')
 const busy = ref(false)
 const error = ref('')
 const uploadPercent = ref(null)
@@ -68,26 +67,22 @@ async function createEdit() {
   select(edit.edit_project_id)
   title.value = ''
 }
-async function importMedia(file) {
-  if (file) {
-    uploading = new AbortController()
-    uploadPercent.value = 0
-    try {
-      await uploadAsset(props.projectId, file, { signal: uploading.signal,
-        progress: (bytes, total) => { uploadPercent.value = Math.round(bytes / total * 100) } })
-    } catch (cause) {
-      if (uploading.signal.aborted) throw new Error('上传已暂停。重新选择同一文件即可续传。')
-      throw cause
-    } finally { uploading = null; uploadPercent.value = null }
-  }
-  else await request(root + '/imports/' + encodeURIComponent(legacyId.value), {})
+async function uploadMedia(file) {
+  uploading = new AbortController()
+  uploadPercent.value = 0
+  try {
+    await uploadAsset(props.projectId, file, { signal: uploading.signal,
+      progress: (bytes, total) => { uploadPercent.value = Math.round(bytes / total * 100) } })
+  } catch (cause) {
+    if (uploading.signal.aborted) throw new Error('上传已暂停。重新选择同一文件即可续传。')
+    throw cause
+  } finally { uploading = null; uploadPercent.value = null }
   assets.value = await listAll(root + '/assets')
-  legacyId.value = ''
 }
 function chooseFile(event) {
   const [file] = event.target.files
   event.target.value = ''
-  if (file) run(() => importMedia(file))
+  if (file) run(() => uploadMedia(file))
 }
 const status = { UPLOADING: '上传中', PROBING: '读取媒体中', REJECTED: '读取失败', DELETING: '移除中', DELETED: '已移除' }
 onMounted(() => run(load))
@@ -103,14 +98,6 @@ onUnmounted(() => uploading?.abort())
       <label>添加视频
         <input type="file" accept="video/*,.mkv" :disabled="busy" @change="chooseFile" />
       </label>
-      <form v-if="library.length" class="edit-inline" @submit.prevent="run(() => importMedia())">
-        <label>已有素材
-          <select v-model="legacyId" :disabled="busy"><option value="">选择媒体库视频</option>
-            <option v-for="m in library" :key="m.id" :value="m.id">{{ m.filename }}</option>
-          </select>
-        </label>
-        <button :disabled="busy || !legacyId">导入素材</button>
-      </form>
       <button :disabled="busy" @click="run(load)">刷新项目</button>
       <span v-if="uploadPercent != null" role="status">上传 {{ uploadPercent }}%</span>
       <button v-if="uploadPercent != null" @click="uploading.abort()">暂停上传</button>

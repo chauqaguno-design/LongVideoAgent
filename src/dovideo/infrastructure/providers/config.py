@@ -1,22 +1,14 @@
-"""Configuration objects for optional real media/model providers.
-
-The application and domain layers deliberately receive ports, not these
-settings.  Environment variables are read only when :meth:`from_environment`
-is called, so importing the package is side-effect free and local/fake
-composition remains possible without credentials.
-"""
+"""OpenAI-compatible settings for the workflow model and visual observations."""
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from dataclasses import dataclass, field
+from hashlib import sha256
 from typing import Mapping
 from urllib.parse import urlsplit
-
-
-MODEL_REASONING_EFFORTS = frozenset({"none", "low", "high", "max"})
-MAX_MODEL_OUTPUT_TOKENS = 393_216
 
 
 class ProviderConfigurationError(ValueError):
@@ -24,48 +16,8 @@ class ProviderConfigurationError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class ModelRequestSettings:
-    """Optional provider-neutral request controls owned by a model profile.
-
-    ``None`` leaves a field out of the HTTP request, preserving the provider's
-    existing default.  The settings contain no model credentials.
-    """
-
-    reasoning_effort: str | None = None
-    max_tokens: int | None = None
-
-    def __post_init__(self) -> None:
-        effort = self.reasoning_effort
-        if effort is not None:
-            if not isinstance(effort, str) or effort not in MODEL_REASONING_EFFORTS:
-                raise ProviderConfigurationError(
-                    "reasoning_effort must be one of none, low, high, or max"
-                )
-        max_tokens = self.max_tokens
-        if max_tokens is not None:
-            if (
-                isinstance(max_tokens, bool)
-                or not isinstance(max_tokens, int)
-                or not 1 <= max_tokens <= MAX_MODEL_OUTPUT_TOKENS
-            ):
-                raise ProviderConfigurationError(
-                    f"max_tokens must be an integer in [1, {MAX_MODEL_OUTPUT_TOKENS}]"
-                )
-
-    def request_fields(self) -> dict[str, str | int]:
-        """Return only explicitly configured Chat Completions fields."""
-
-        fields: dict[str, str | int] = {}
-        if self.reasoning_effort is not None:
-            fields["reasoning_effort"] = self.reasoning_effort
-        if self.max_tokens is not None:
-            fields["max_tokens"] = self.max_tokens
-        return fields
-
-
-@dataclass(frozen=True, slots=True)
 class ProviderConfig:
-    """Small OpenAI-compatible provider setting shared by model/embedding.
+    """OpenAI-compatible chat deployment.
 
     ``api_key`` is optional to support local OpenAI-compatible servers.  A
     remote deployment can require it in its composition root without making
@@ -79,12 +31,11 @@ class ProviderConfig:
     timeout_seconds: float = 120.0
     max_attempts: int = 3
     retry_delay_seconds: float = 0.0
-    embedding_model: str | None = None
-    embedding_url: str | None = None
     transport: str = "openai-compatible"
     provider_only: tuple[str, ...] = ()
     provider_data_collection: str | None = None
     provider_zdr: bool | None = None
+    response_model: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.base_url, str) or not self.base_url.strip():
@@ -96,8 +47,11 @@ class ProviderConfig:
             if base_url.endswith(suffix):
                 base_url = base_url[: -len(suffix)]
                 break
-        parsed = urlsplit(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        try:
+            parsed = urlsplit(base_url)
+        except ValueError as exc:
+            raise ProviderConfigurationError("provider base URL must be HTTP(S)") from exc
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ProviderConfigurationError("provider base URL must be HTTP(S)")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ProviderConfigurationError("provider model is required")
@@ -110,23 +64,6 @@ class ProviderConfig:
         timeout = _finite_positive(self.timeout_seconds, "timeout_seconds")
         attempts = _positive_int(self.max_attempts, "max_attempts")
         delay = _finite_nonnegative(self.retry_delay_seconds, "retry_delay_seconds")
-        embedding_model = self.embedding_model
-        if embedding_model is not None:
-            if not isinstance(embedding_model, str) or not embedding_model.strip():
-                raise ProviderConfigurationError(
-                    "embedding_model must be nonblank when provided"
-                )
-            embedding_model = embedding_model.strip()
-        embedding_url = self.embedding_url
-        if embedding_url is not None:
-            if not isinstance(embedding_url, str) or not embedding_url.strip():
-                raise ProviderConfigurationError(
-                    "embedding_url must be nonblank when provided"
-                )
-            embedding_url = embedding_url.strip().rstrip("/")
-            embedding_parts = urlsplit(embedding_url)
-            if embedding_parts.scheme not in {"http", "https"} or not embedding_parts.netloc:
-                raise ProviderConfigurationError("embedding_url must be HTTP(S)")
         if self.transport not in {"openai-compatible", "openrouter"}:
             raise ProviderConfigurationError("unsupported model transport")
         if self.transport == "openrouter":
@@ -148,8 +85,6 @@ class ProviderConfig:
         object.__setattr__(self, "timeout_seconds", timeout)
         object.__setattr__(self, "max_attempts", attempts)
         object.__setattr__(self, "retry_delay_seconds", delay)
-        object.__setattr__(self, "embedding_model", embedding_model)
-        object.__setattr__(self, "embedding_url", embedding_url)
 
     @property
     def chat_url(self) -> str:
@@ -160,10 +95,34 @@ class ProviderConfig:
         return f"{self.base_url}/chat/completions"
 
     @property
-    def embeddings_url(self) -> str:
-        """OpenAI-compatible embedding endpoint."""
+    def loopback(self) -> bool:
+        return urlsplit(self.base_url).hostname in {"localhost", "127.0.0.1", "::1"}
 
-        return self.embedding_url or f"{self.base_url}/embeddings"
+    @property
+    def resolved_model(self) -> str:
+        return self.response_model or self.model
+
+    @property
+    def auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+
+    def request_options(self) -> dict:
+        if self.transport == "openrouter":
+            return {"provider": dict(
+                only=list(self.provider_only), allow_fallbacks=False, require_parameters=True,
+                data_collection=self.provider_data_collection, zdr=self.provider_zdr,
+            )}
+        if urlsplit(self.base_url).hostname == "api.deepseek.com":
+            return {"thinking": {"type": "disabled"}}
+        return {}
+
+    def fingerprint(self) -> str:
+        # Preserve the deployment fingerprint already pinned in workflow checkpoints.
+        parts = ["chat-completions-flash-probe-v1", self.base_url, self.model, self.transport,
+                 self.provider_only, self.provider_data_collection, self.provider_zdr]
+        if thinking := self.request_options().get("thinking"):
+            parts.append({"thinking": thinking})
+        return sha256(json.dumps(parts).encode()).hexdigest()
 
     @classmethod
     def from_environment(
@@ -173,17 +132,10 @@ class ProviderConfig:
         prefix: str = "DOVIDEO_",
         required: bool = False,
     ) -> "ProviderConfig | None":
-        """Build settings from environment without reading it at import time.
-
-        The names intentionally mirror the Java properties while using a
-        project-specific prefix: ``DOVIDEO_MODEL_BASE_URL``,
-        ``DOVIDEO_MODEL_API_KEY``, ``DOVIDEO_MODEL_MODEL`` and
-        ``DOVIDEO_MODEL_TIMEOUT_SECONDS``.  ``required=False`` returns
-        ``None`` when no endpoint is configured, which is useful for offline
-        tests and local composition.
-        """
+        """Build settings from environment without reading it at import time."""
 
         values = os.environ if environ is None else environ
+        response_model = _first_value(values, f"{prefix}MODEL_VERSION")
         transport = _first_value(values, f"{prefix}MODEL_TRANSPORT") or "openai-compatible"
         if transport == "openrouter":
             key = _first_value(values, f"{prefix}OPENROUTER_API_KEY")
@@ -208,6 +160,7 @@ class ProviderConfig:
                 timeout_seconds=timeout,
                 max_attempts=attempts,
                 retry_delay_seconds=delay,
+                response_model=response_model,
             )
         if transport != "openai-compatible":
             raise ProviderConfigurationError("unsupported model transport")
@@ -229,7 +182,7 @@ class ProviderConfig:
             f"{prefix}MODEL_NAME",
             f"{prefix}LLM_MODEL",
             "LLM_MODEL",
-        ) or "deepseek-ai/DeepSeek-V3.2"
+        ) or "deepseek-flash"
         api_key = _first_value(
             values,
             f"{prefix}MODEL_API_KEY",
@@ -237,11 +190,6 @@ class ProviderConfig:
             f"{prefix}DEEPSEEK_API_KEY",
             "SILICONFLOW_API_KEY",
         )
-        embedding_model = _first_value(
-            values,
-            f"{prefix}EMBEDDING_MODEL",
-            "EMBEDDING_MODEL",
-        ) or "BAAI/bge-m3"
         timeout_text = _first_value(
             values,
             f"{prefix}MODEL_TIMEOUT_SECONDS",
@@ -264,14 +212,28 @@ class ProviderConfig:
             timeout_seconds=timeout,
             max_attempts=attempts,
             retry_delay_seconds=delay,
-            embedding_model=embedding_model,
+            response_model=response_model,
         )
 
 
-# Names used by composition roots during migration; they intentionally refer
-# to one setting model rather than creating provider-specific config schemas.
-ModelProviderConfig = ProviderConfig
-EmbeddingProviderConfig = ProviderConfig
+def configured_model(env: Mapping[str, str]) -> ProviderConfig | None:
+    """Read the app's deployment and credentials from its own environment variables."""
+    values = {key: value for key, value in env.items() if key.startswith("DOVIDEO_")}
+    try:
+        config = ProviderConfig.from_environment(values)
+    except ProviderConfigurationError:
+        return None
+    if config is None or config.api_key == "replace-me" or (not config.loopback and not config.api_key):
+        return None
+    return config
+
+
+def model_supports_vision(env: Mapping[str, str]) -> bool:
+    return env.get("DOVIDEO_MODEL_VISION", "1") == "1"
+
+
+def model_tool_mode(env: Mapping[str, str]) -> str:
+    return "native" if env.get("DOVIDEO_MODEL_NATIVE_TOOLS") == "1" else "json"
 
 
 def _first_value(values: Mapping[str, str], *names: str) -> str | None:
@@ -308,14 +270,3 @@ def _positive_int(value: object, field_name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ProviderConfigurationError(f"{field_name} must be a positive integer")
     return value
-
-
-__all__ = [
-    "EmbeddingProviderConfig",
-    "MAX_MODEL_OUTPUT_TOKENS",
-    "MODEL_REASONING_EFFORTS",
-    "ModelRequestSettings",
-    "ModelProviderConfig",
-    "ProviderConfig",
-    "ProviderConfigurationError",
-]

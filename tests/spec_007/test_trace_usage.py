@@ -54,19 +54,18 @@ def test_socket_timeout_and_decoded_export_have_correlated_durable_traces(tmp_pa
     if not ffmpeg:
         pytest.skip("FFmpeg required")
     monkeypatch.setenv("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_TEAM", "false")
     root = tmp_path / "app"
     with TestClient(create_app(work_dir=root)) as client, slow_endpoint() as (url, received):
         movie = prepare_workspace(client, tmp_path, ffmpeg, "trace_editor")
+        model = "deepseek-flash-local-test"
         planner = FlashPlanner({
             "DOVIDEO_WORKFLOW_LIVE_MODEL": "1", "DOVIDEO_MODEL_BASE_URL": url,
             "DOVIDEO_MODEL_MODEL": "deepseek-flash", "DOVIDEO_MODEL_API_KEY": "loopback-fixture-only",
+            "DOVIDEO_MODEL_VERSION": model, "DOVIDEO_MODEL_NATIVE_TOOLS": "1",
             "DOVIDEO_MODEL_TIMEOUT_SECONDS": "0.25", "DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS": "50000",
             "DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION": "200", "DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION": "600",
             "DOVIDEO_FLASH_PRICE_VERSION": "fixture-price-2026",
         })
-        model = "deepseek-flash-local-test"
-        monkeypatch.setattr(planner, "identity", lambda: dict(model=model, fingerprint="loopback", mode="native"))
         client.app.state.workflow_worker.planner = planner
         failed = json_body(client.post("/v1/workflow-runs", json=dict(scope=movie["scope"], intent="EDIT",
             message="找人物犹豫后才开口的片段", budget=dict(DEFAULT_BUDGET, max_cost_microunits=50000),

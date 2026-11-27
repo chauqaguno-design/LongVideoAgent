@@ -3,21 +3,13 @@ from functools import partial
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse, JSONResponse
 
-from dovideo.application.edit_timeline import EditError, invalid, uid
+from dovideo.application.edit_timeline import EditError, uid
 from dovideo.application.render_formats import EXPORT_FORMATS
-from dovideo.application.spec_contracts import validate_contract
 from dovideo.infrastructure.persistence.edit_repository import EditRepository, job_view, project_view
 from dovideo.infrastructure.persistence.edit_tables import jobs, projects, revisions
 from dovideo.infrastructure.persistence.render_worker import RenderWorker
 from .edit_sources import signature
-
-
-def checked(schema, body):
-    try:
-        validate_contract(schema, body)
-    except ValueError as exc:
-        raise invalid(str(exc)) from exc
-    return body
+from .schemas import CancelRequest, EditProjectCreate, RenderJobCreate, TimelinePatch
 
 
 def install_edit_routes(app, require_user):
@@ -35,8 +27,8 @@ def install_edit_routes(app, require_user):
         return sources.workspace(user)
 
     @router.post("/edit-projects", status_code=201)
-    def create(body: dict, scope=Depends(workspace)):
-        return repo.create(scope, checked("EditProjectCreate", body))
+    def create(body: EditProjectCreate, scope=Depends(workspace)):
+        return repo.create(scope, body)
 
     @router.get("/projects/{project_id}/edit-projects")
     def list_edits(project_id: str, scope=Depends(workspace), cursor: str | None=None,
@@ -59,14 +51,14 @@ def install_edit_routes(app, require_user):
         return repo.get(revisions, scope, revision_id, lambda r: r.snapshot, edit_id=edit_project_id)
 
     @router.post("/edit-projects/{edit_project_id}/operations", status_code=201)
-    def patch(edit_project_id: str, body: dict, scope=Depends(workspace)):
-        result = repo.patch(scope, edit_project_id, checked("TimelinePatch", body))
+    def patch(edit_project_id: str, body: TimelinePatch, scope=Depends(workspace)):
+        result = repo.patch(scope, edit_project_id, body)
         return JSONResponse(result, status_code=200 if result["replayed"] else 201)
 
     @router.post("/render-jobs", status_code=202)
-    def render(body: dict, scope=Depends(workspace),
+    def render(body: RenderJobCreate, scope=Depends(workspace),
                export_format: str=Query("mp4", alias="format", json_schema_extra={"enum": list(EXPORT_FORMATS)})):
-        return repo.enqueue(scope, checked("RenderCreate", body), export_format=export_format)
+        return repo.enqueue(scope, body, export_format=export_format)
 
     @router.get("/render-jobs/{render_job_id}")
     def get_job(render_job_id: str, scope=Depends(workspace)):
@@ -79,8 +71,8 @@ def install_edit_routes(app, require_user):
         return repo.page(jobs, scope, job_view, dict(edit_id=edit_project_id), cursor, limit)
 
     @router.post("/render-jobs/{render_job_id}/cancel", status_code=202)
-    def cancel(render_job_id: str, body: dict, scope=Depends(workspace)):
-        return repo.cancel(scope, render_job_id, checked("CancelRequest", body))
+    def cancel(render_job_id: str, body: CancelRequest, scope=Depends(workspace)):
+        return repo.cancel(scope, render_job_id, body)
 
     @router.get("/edit-artifacts/{artifact_id}/content", name="edit_artifact_content")
     def content(artifact_id: str, w: str, expires: int, sig: str):

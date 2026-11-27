@@ -1,7 +1,6 @@
 """Bounded local decoding with a common presentation origin for all outputs."""
 
 from fractions import Fraction
-from functools import lru_cache
 import hashlib
 from pathlib import Path
 import re
@@ -16,25 +15,6 @@ from .process import command
 def digest_file(path):
     with Path(path).open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
-@lru_cache(maxsize=16)
-def model_stamp(root, signature):
-    """Content fingerprint of local weights, cached until size or mtime changes."""
-    return hashlib.sha256(
-        "".join(digest_file(Path(root) / name) for name, _, _ in signature).encode()
-    ).hexdigest()
-
-
-def model_digest(path):
-    paths = sorted(
-        p
-        for p in path.rglob("*")
-        if p.is_file()
-        and p.suffix.lower() in (".bin", ".safetensors", ".pdiparams", ".pdmodel", ".json", ".yml", ".txt")
-    )
-    signature = tuple((str(p.relative_to(path)), p.stat().st_size, p.stat().st_mtime_ns) for p in paths)
-    return model_stamp(str(path), signature)
 
 
 class SourceReader:

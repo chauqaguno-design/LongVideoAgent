@@ -1,20 +1,19 @@
 """Add scoped editing projects and immutable media revisions."""
 from alembic import op
 import sqlalchemy as sa
-from dovideo.infrastructure.persistence.migrations import create_or_adopt_table
 
 revision = "0005_edit_sources"
-down_revision = "0004_media_content_identity"
+down_revision = "0001_schema_baseline"
 branch_labels = depends_on = None
 
 
 def upgrade():
-    create_or_adopt_table("vm_projects",
+    op.create_table("vm_projects",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("workspace", sa.String(36), nullable=False, index=True),
         sa.Column("title", sa.String(160), nullable=False),
         sa.Column("created", sa.String(40), nullable=False))
-    create_or_adopt_table("vm_sources",
+    op.create_table("vm_sources",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("project", sa.String(36), sa.ForeignKey("vm_projects.id"), nullable=False, index=True),
         sa.Column("workspace", sa.String(36), nullable=False, index=True),

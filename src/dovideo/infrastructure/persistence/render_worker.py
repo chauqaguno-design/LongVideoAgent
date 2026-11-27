@@ -15,7 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from dovideo.application.edit_timeline import EditError, missing, uid
 from dovideo.application.render_formats import EXPORT_MIME
-from dovideo.presentation.composition import AnalysisSettings
+from dovideo.infrastructure.edit_media import media_binaries
 from dovideo.infrastructure.media.process import check_running, MediaStopped
 from .edit_repository import caption_font, one, owned, render_key
 from .edit_tables import artifacts, jobs, revisions
@@ -23,11 +23,6 @@ from .work_outbox import emit
 
 log = logging.getLogger(__name__)
 LEASE_SECONDS = 90
-
-
-def media_binaries():
-    settings = AnalysisSettings.from_environment()
-    return dict(ffmpeg=settings.ffmpeg_executable, ffprobe=settings.ffprobe_executable)
 
 
 def ready(now):
@@ -180,8 +175,6 @@ class RenderWorker:
                     with path.open("rb") as handle:
                         sha = hashlib.file_digest(handle, "sha256").hexdigest()
                 relative = path.relative_to(self.root).as_posix()
-                if objects := self.repo.sources.objects:
-                    objects.put(f"videomind/renders/{row.workspace_id}/{relative}", path)
                 records.append(dict(id=uid(), workspace_id=row.workspace_id, revision_id=row.revision_id,
                                kind=kind, digest=sha, size=path.stat().st_size,
                                relative_path=relative))
@@ -224,8 +217,6 @@ class RenderWorker:
 
     def materialize(self, row):
         path = self.root / row.relative_path
-        if objects := self.repo.sources.objects:
-            return objects.fetch(f"videomind/renders/{row.workspace_id}/{row.relative_path}", row.digest, path)
         if not path.is_file():
             raise missing()
         return path

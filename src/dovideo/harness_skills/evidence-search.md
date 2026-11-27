@@ -1,0 +1,1 @@
+Use the frozen index and source time ranges. A retrieval score ranks a candidate. Cite an evidence ID only when the returned record supports the requested claim. Open a small context window to resolve unclear dialogue.

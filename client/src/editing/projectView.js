@@ -8,7 +8,7 @@ export const stateNames = {
   ROUTE: '识别任务目标', PLAN: '规划任务', PROPOSE: '拟定剪辑方案', COMMIT: '提交时间线', RENDER: '渲染成片', REVIEW: '核查结果', DONE: '已结束',
   SAMPLING: '抽取源帧', NOTES: '生成观影笔记', INDEXING: '建立检索索引', PUBLISHED: '索引已发布',
   RESUMING: '恢复处理中', DELETED: '清理已完成',
-  ASR: '语音', OCR: '画面文字', VISUAL: '画面', COORDINATOR: '协调', MATERIAL: '选材', EDITOR: '编辑', REVIEWER: '审阅',
+  ASR: '语音', OCR: '画面文字', VISUAL: '画面', MATERIAL: '选材',
   asr: '语音转写', ocr: '画面文字', visual_observation: '画面观察', text_embedding: '文字索引', image_embedding: '图片索引',
   'embedded-subtitle': '内嵌字幕', 'faster-whisper': '语音转写', 'paddleocr': '画面文字', 'sampled-frame': '采样画面',
 }

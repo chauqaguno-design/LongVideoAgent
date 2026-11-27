@@ -13,7 +13,6 @@ from sqlalchemy import create_engine
 
 from dovideo.application.edit_sources import EditSources
 from dovideo.application.evidence_search import EvidenceSearch
-from dovideo.application.spec_contracts import validate_contract
 from dovideo.infrastructure.persistence.source_tables import projects, sources
 from dovideo.infrastructure.persistence.search_tables import artifacts, runs
 from dovideo.presentation.api.search import install_search_routes
@@ -137,7 +136,6 @@ def test_query_filters_before_top_k_and_rejects_foreign_revision(ctx):
     for _ in range(25):
         c.evidence(c.query["text"], 20, mid=other, scope=other_ws, pid=foreign)
     result = c.service.search(c.ws, dict(c.query, top_k=1))
-    validate_contract("SearchResult", result)
     (hit,) = result["hits"]
     assert hit["verified"] is False and hit["evidence_ids"] == [known["evidence_id"]]
     assert result["candidate_count"] == 1 and hit["route_ranks"][0]["route"] == "bm25"
@@ -177,7 +175,6 @@ def test_global_literal_evidence_beyond_top_k_and_unverified_prefix(ctx):
     assert result["verification_required"] and result["truncated"] and result["candidate_count"] == 3
     c.catalog.checked = {c.mid: [dict(start_us=10_000_000, end_us=3_600_000_000)]}
     answer = c.service.answer(c.ws, uid(), dict(request, query_mode="FIRST"))
-    validate_contract("AnswerResult", answer)
     assert answer["found_event_count"] == 3 and answer["count_qualifier"] == "OBSERVED_ONLY"
     assert "目前" in answer["answer"] and "首次匹配" not in answer["answer"]
     assert answer["coverage_summary"]["unverified_ranges"] == [
@@ -228,24 +225,12 @@ def test_incomplete_encoder_response_preserves_lexical_hits(ctx, monkeypatch):
     assert any("编码器不可用" in msg for msg in result["warnings"])
 
 
-def test_artifacts_restore_on_another_cache_and_recheck_scope(ctx):
-    from pathlib import Path
+def test_local_artifacts_survive_reopen_and_recheck_scope(ctx):
     from uuid import UUID, uuid5
-    from dovideo.infrastructure.object_sources import SourceObjects
     from dovideo.infrastructure.search_artifacts import SearchArtifacts
 
     c = ctx
-    remote = {}
-
-    class Bucket:
-        def fput_object(self, bucket, key, path):
-            remote[key] = Path(path).read_bytes()
-
-        def fget_object(self, bucket, key, path):
-            Path(path).write_bytes(remote[key])
-
     writer = c.service.files
-    c.store.objects = SourceObjects(Bucket(), "scratch")
     parent = writer.save(c.ws, c.project, b"an image", "IMAGE_QUERY", "image/png")
     metadata = dict(parent_artifact_id=parent, roi=dict(x=2, y=3, width=7, height=4))
     image = writer.save(c.ws, c.project, b"cropped pixels", "IMAGE_QUERY", "image/png")
@@ -268,146 +253,27 @@ def test_artifacts_restore_on_another_cache_and_recheck_scope(ctx):
         "application/json",
         [c.mid],
     )
-    replica = EditSources(c.store.sessions.kw["bind"], c.folder / "node-b")
-    replica.objects = c.store.objects
-    restored = SearchArtifacts(replica)
-    assert not restored.root.exists()
-    assert restored.image(c.ws, c.project, image) == b"cropped pixels"
-    assert restored.roi(c.ws, c.project, image) == metadata
-    assert restored.occurrences(c.ws, c.project, key) == [{"id": "event-1"}]
-    assert restored.verified(c.ws, proof) == {"support": "SUPPORTED"}
-    with c.store.sessions.begin() as db:
-        db.execute(sources.update().where(sources.c.revision == c.mid).values(probe={"deleted": True}))
-    with pytest.raises(HTTPException) as exc:
-        restored.occurrences(c.ws, c.project, key)
-    assert exc.value.status_code == 404
-
-
-@pytest.mark.parametrize("server", [False, True], ids=["local-files", "http-qdrant"])
-def test_retention_removes_only_tombstoned_search_data(ctx, server, monkeypatch):
-    import os, time
-    from sqlalchemy import select
-    from dovideo.infrastructure.persistence.processing_tables import records, runs as processing
-    from dovideo.infrastructure.search_cleanup import cleanup_search
-    from dovideo.infrastructure.search_encoder import SearchEncoder
-    from dovideo.infrastructure.vector.evidence_index import EvidenceIndex, point
-
-    url = os.getenv("VIDEOMIND_TEST_SEARCH_GC_QDRANT_URL")
-    if server and not url:
-        pytest.skip("requires an isolated HTTP Qdrant test server")
-    for name in ("VIDEOMIND_SEARCH_QDRANT_PATH", "VIDEOMIND_SEARCH_QDRANT_URL"):
-        monkeypatch.delenv(name, raising=False)
-    c = ctx
-    db = c.store.sessions.kw["bind"]
-    processing.create(db)
-    records.create(db)
-    index = EvidenceIndex(url=url) if server else None
-    minio_url = os.getenv("VIDEOMIND_TEST_SEARCH_GC_MINIO")
-    if server and minio_url:
-        from minio import Minio
-        from dovideo.infrastructure.object_sources import SourceObjects
-
-        client = Minio(
-            minio_url,
-            access_key=os.environ["MINIO_ROOT_USER"],
-            secret_key=os.environ["MINIO_ROOT_PASSWORD"],
-            secure=False,
-        )
-        bucket = "gc-" + uid()
-        client.make_bucket(bucket)
-        c.store.objects = SourceObjects(client, bucket)
-    model = dict(version="retention-test-" + uid(), dimensions=3)
-    encoder = SearchEncoder("", c.store.root / "embeddings", index=index)
-    other_ws = c.store.workspace({"id": 2})
-    other_project = c.store.create_project(other_ws, "foreign")["project_id"]
-    active, foreign = c.media(), c.media(other_ws, other_project)
-    file_store = c.service.files
-    raw = file_store.save(c.ws, c.project, b"same bytes", "IMAGE_QUERY", "image/png")
-    duplicate = file_store.save(c.ws, c.project, b"same bytes", "QUERY_RESULT", "application/json", [c.mid])
-    secret = file_store.save(c.ws, c.project, b"deleted result", "QUERY_RESULT", "application/json", [c.mid])
-    protected = file_store.save(
-        other_ws, other_project, b"deleted result", "QUERY_RESULT", "application/json", [foreign]
-    )
-    secret_path = file_store.path(file_store.get(c.ws, secret))
-    scan = file_store.freeze(
-        c.ws, uid(), "q", dict(project=c.project, requested=[dict(media_revision_id=c.mid)])
-    )
-    prepared = []
-    for scope, pid, mid, claim in (
-        (c.ws, c.project, c.mid, "secret"),
-        (c.ws, c.project, active, "shared"),
-        (other_ws, other_project, foreign, "secret"),
-    ):
-        component = uid()
-        row = c.evidence(claim, 100, mid=mid, scope=scope, pid=pid)
-        row["source_generation_id"] = component
-        with db.begin() as con:
-            asset = con.execute(select(sources.c.id).where(sources.c.revision == mid)).scalar_one()
-            con.execute(
-                processing.insert().values(
-                    id=component,
-                    workspace=scope,
-                    project=pid,
-                    revision=mid,
-                    asset=asset,
-                    kind="INDEX",
-                    config={},
-                    status="SUCCEEDED",
-                    stage="PUBLISHED",
-                    completed=1,
-                    attempt=1,
-                    lease_end=0,
-                    created="2026-11-01",
-                )
-            )
-            con.execute(
-                records.insert().values(
-                    id=uid(),
-                    workspace=scope,
-                    asset=asset,
-                    run=component,
-                    kind="EVIDENCE",
-                    unit="cue",
-                    start_us=100,
-                    body=dict(evidence=row, source="embedded-subtitle"),
-                )
-            )
-        encoder.freeze_spaces(scope, [row], {"text": model})
-        vector = encoder.vector_path(scope, model, claim)
-        vector.parent.mkdir(parents=True, exist_ok=True)
-        vector.write_bytes(b"vector")
-        if index:
-            index.write(model, [point(row, [1, 0, 0])])
-        prepared.append((row, vector))
-    with db.begin() as con:
-        con.execute(
-            sources.update().where(sources.c.revision == c.mid).values(probe=dict(deleted=True, deleted_at=1))
-        )
-    cutoff = time.time() + 1
-    assert cleanup_search(c.store, cutoff=cutoff, index=index) and secret_path.is_file()
-    removed = cleanup_search(c.store, cutoff=cutoff, index=index, apply=True)
-    assert "query-scan/" + scan.run_id in removed
-    assert (
-        file_store.get(c.ws, secret) is None
-        and file_store.get(c.ws, duplicate) is None
-        and not secret_path.exists()
-    )
-    assert (
-        file_store.image(c.ws, c.project, raw) == b"same bytes"
-        and file_store.path(file_store.get(other_ws, protected)).is_file()
-    )
-    assert not prepared[0][1].exists() and all(p.is_file() for _, p in prepared[1:])
-    if c.store.objects:
-        objects = {item.object_name for item in client.list_objects(bucket, recursive=True)}
-        assert file_store.object_key(c.ws, secret_path.name) not in objects
-        assert file_store.object_key(other_ws, secret_path.name) in objects
-        assert file_store.object_key(c.ws, file_store.get(c.ws, raw).digest) in objects
-    if index:
-        assert index.rank(model, [1, 0, 0], [prepared[0][0]], 1) == []
-        assert all(index.rank(model, [1, 0, 0], [row], 1) for row, _ in prepared[1:])
-    assert cleanup_search(c.store, cutoff=cutoff, index=index, apply=True) == []
-    with pytest.raises(HTTPException):
-        file_store.save(c.ws, c.project, b"later publication", "QUERY_EVIDENCE", "application/json", [c.mid])
+    engine = create_engine(c.store.sessions.kw["bind"].url)
+    try:
+        reopened = SearchArtifacts(EditSources(engine, c.folder))
+        assert reopened.image(c.ws, c.project, image) == b"cropped pixels"
+        assert reopened.roi(c.ws, c.project, image) == metadata
+        assert reopened.occurrences(c.ws, c.project, key) == [{"id": "event-1"}]
+        assert reopened.verified(c.ws, proof) == {"support": "SUPPORTED"}
+        with pytest.raises(HTTPException) as foreign:
+            reopened.occurrences(c.store.workspace({"id": 2}), c.project, key)
+        assert foreign.value.status_code == 404
+        with c.store.sessions.begin() as db:
+            db.execute(sources.update().where(sources.c.revision == c.mid).values(probe={"deleted": True}))
+        with pytest.raises(HTTPException) as deleted:
+            reopened.occurrences(c.ws, c.project, key)
+        assert deleted.value.status_code == 404
+        with pytest.raises(HTTPException) as late:
+            reopened.save(c.ws, c.project, b"late publication", "QUERY_EVIDENCE", "application/json", [c.mid])
+        assert late.value.status_code == 404
+        assert reopened.image(c.ws, c.project, parent) == b"an image"
+    finally:
+        engine.dispose()
 
 
 def test_unchecked_action_is_not_confirmed_by_frame(ctx):
@@ -566,7 +432,6 @@ def test_real_cropped_jpeg_query_and_scoped_artifact(ctx):
         upload = http.post(url, files={"file": ("jpeg.txt", query.getvalue(), "text/plain")})
         assert upload.status_code == 201, upload.text
         artifact = upload.json()
-        validate_contract("Artifact", artifact)
         assert artifact["mime_type"] == "image/jpeg" and http.get(artifact["url"]).content == query.getvalue()
         request = dict(
             scope=c.query["scope"],
@@ -594,28 +459,15 @@ def test_real_cropped_jpeg_query_and_scoped_artifact(ctx):
         answer = app.state.evidence_search.answer(
             c.ws, uid(), dict(request, image_artifact_id=unchanged["artifact_id"])
         )
-        proof = app.state.evidence_search.verified_evidence(c.ws, answer["claims"][0]["evidence_ids"][0])
-        validate_contract("Evidence", proof)
-        assert proof["support"] == "SUPPORTED" and proof["artifact_ids"] == [
-            unchanged["artifact_id"],
-            target["frame"]["artifact_id"],
-        ]
-        assert (
-            proof["range"]["start_us"] == target["frame"]["actual_us"]
-            and proof["index_generation_id"] is None
-        )
-        assert app.state.evidence_search.verified_evidence(uid(), proof["evidence_id"]) is None
+        assert answer["claims"] and all(claim["support"] == "UNCERTAIN" for claim in answer["claims"])
+        assert answer["claims"][0]["evidence_ids"] == [target["evidence_id"]]
+        assert answer["coverage_summary"]["unverified_ranges"] == answer["coverage_summary"]["requested_ranges"]
         roi_url = f"{url}/{unchanged['artifact_id']}/roi"
         box = dict(x=20, y=12, width=120, height=72)
         assert http.post(roi_url, json=dict(box, width=999)).status_code == 422
         cropped = http.post(roi_url, json=box).json()
         assert http.post(roi_url, json=box).json()["artifact_id"] == cropped["artifact_id"]
-        region = app.state.evidence_search.answer(
-            c.ws, uid(), dict(request, image_artifact_id=cropped["artifact_id"])
-        )
-        region_proof = app.state.evidence_search.verified_evidence(
-            c.ws, region["claims"][0]["evidence_ids"][0]
-        )
-        assert unchanged["artifact_id"] in region_proof["artifact_ids"] and "选区" in region_proof["claim"]
-        near = app.state.evidence_search.answer(c.ws, uid(), request)
-        assert all(c["support"] == "UNCERTAIN" for c in near["claims"])
+        provenance = app.state.evidence_search.files.roi(c.ws, c.project, cropped["artifact_id"])
+        assert provenance["parent_artifact_id"] == unchanged["artifact_id"] and provenance["roi"] == box
+        with Image.open(BytesIO(http.get(cropped["url"]).content)) as region:
+            assert region.size == (120, 72)

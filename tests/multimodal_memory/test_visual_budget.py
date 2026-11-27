@@ -15,19 +15,18 @@ from dovideo.infrastructure.persistence.processing_tables import records, runs
 from dovideo.infrastructure.persistence.source_tables import projects, sources
 from dovideo.infrastructure.persistence.sqlalchemy import Base
 from dovideo.infrastructure.persistence.workspace_budget_table import workspace_budgets
-from dovideo.infrastructure.providers.config import ProviderConfig
 
 
-def test_opt_in_preflight_and_settlement(tmp_path, monkeypatch):
-    config = ProviderConfig("https://offline.example/v1", "deepseek-flash", api_key="fixture")
-    report = dict(
-        status="PASSED", checks=dict(image_json=True), resolved_model_version="deepseek-flash-test"
-    )
-    monkeypatch.setattr(visual, "flash_config", lambda env: config)
-    monkeypatch.setattr(visual, "current_report", lambda env: report)
+def test_configured_deployment_opt_in_and_settlement(tmp_path, monkeypatch):
     assert visual.visual_deployment({}) is None
     assert visual.visual_deployment(dict(DOVIDEO_LOCAL_FLASH_INFERENCE="1")) is None
+    local = dict(DOVIDEO_LOCAL_FLASH_INFERENCE="1", DOVIDEO_MODEL_BASE_URL="http://127.0.0.1:8000/v1")
+    assert not visual.visual_deployment(local).billed
     cfg = dict(
+        DOVIDEO_MODEL_BASE_URL="https://offline.example/v1",
+        DOVIDEO_MODEL_MODEL="deepseek-flash",
+        DOVIDEO_MODEL_VERSION="deepseek-flash-test",
+        DOVIDEO_MODEL_API_KEY="fixture",
         DOVIDEO_MEDIA_REMOTE_FLASH="1",
         DOVIDEO_MEDIA_VISUAL_MAX_CNY_MICROUNITS="100",
         DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="100",
@@ -36,10 +35,10 @@ def test_opt_in_preflight_and_settlement(tmp_path, monkeypatch):
         DOVIDEO_FLASH_PRICE_VERSION="fixture",
     )
     deployment = visual.visual_deployment(cfg)
-    assert deployment.billed
-    report["status"] = "BLOCKED"
-    assert visual.visual_deployment(cfg) is None
-    report["status"] = "PASSED"
+    assert deployment.billed and deployment.model == "deepseek-flash-test"
+    assert visual.visual_deployment(dict(cfg, DOVIDEO_MODEL_VISION="0")) is None
+    assert visual.visual_deployment(dict(cfg, DOVIDEO_MODEL_API_KEY="")) is None
+    assert visual.visual_deployment(dict(cfg, DOVIDEO_MODEL_BASE_URL="http://offline.example/v1")) is None
     db = create_engine(f"sqlite:///{tmp_path/'budget.sqlite3'}")
     Base.metadata.create_all(db, tables=[projects, sources, runs, records, workspace_budgets])
     catalog = MediaCatalog(EditSources(db, tmp_path))

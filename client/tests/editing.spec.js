@@ -38,7 +38,6 @@ test('restores a deep-linked conversation and keeps earlier answers attached to 
       [previous, { ...previous, run_id: 'new', parent_run_id: 'old', message: '新问题', answer: '新任务的回答' }] })
     if (path.endsWith('/events')) return new Response('')
     if (path.endsWith('/result')) return json({ answer: path.includes('/old/') ? '旧任务的回答' : '新任务的回答' })
-    if (path.endsWith('/team-tasks') || path.endsWith('/mailbox-events')) return json(page([]))
     return json({ status: 'SUCCEEDED', result_artifact_id: 'answer' })
   }))
   const wrapper = render(WorkflowPanel, { projectId: 'p', assets: [asset] })
@@ -55,17 +54,13 @@ test('restores a deep-linked conversation and keeps earlier answers attached to 
   expect(location.hash).toContain('run=new')
 })
 
-test('shows failed and re-assigned role work alongside unsettled costs', async () => {
+test('shows the failed stage and unsettled costs while retrying', async () => {
   history.replaceState(null, '', '#edit?project=p&view=workflow&run=run')
   let resumed = null
   vi.stubGlobal('fetch', vi.fn(async (url, options) => {
     const path = new URL(url, 'http://local').pathname
     if (path.endsWith('/projects/p/workflow-runs')) return json(page([{ run_id: 'run' }]))
     if (path.endsWith('/conversation')) return json({ turns: [{ run_id: 'run', media_revision_id: 'm', message: '剪片', status: 'FAILED' }] })
-    if (path.endsWith('/team-tasks')) return json(page([
-      { task_id: 'proposal', role: 'EDITOR', status: 'FAILED', attempt: 2, depends_on: ['material'] },
-    ]))
-    if (path.endsWith('/mailbox-events')) return json(page([{ message_id: 'm', summary: '上一轮租约已到期' }]))
     if (path.endsWith('/events')) return new Response('')
     if (path.endsWith('/resume')) { resumed = JSON.parse(options.body); return json({ run_id: 'run' }) }
     return json({ status: resumed ? 'SUCCEEDED' : 'FAILED', phase: 'PROPOSE', state_version: 9,
@@ -76,8 +71,8 @@ test('shows failed and re-assigned role work alongside unsettled costs', async (
   }))
   const wrapper = render(WorkflowPanel, { projectId: 'p', assets: [asset] })
   await flushPromises()
-  expect(wrapper.text()).toContain('编辑 · 失败 · 第 2 次')
-  expect(wrapper.text()).toContain('上一轮租约已到期')
+  expect(wrapper.text()).toContain('失败 · 拟定剪辑方案')
+  expect(wrapper.text()).toContain('临时故障')
   expect(wrapper.text()).toContain('模型费用待核算')
   expect(wrapper.text()).toContain('0.0035 CNY 预占费用待核账')
   await click(wrapper, '重试本轮')
@@ -97,7 +92,6 @@ test('a new chat never inherits an arbitrary run; changing video clears candidat
       sends.push(JSON.parse(options.body))
       return json({ run_id: 'turn' + sends.length })
     }
-    if (path.endsWith('/team-tasks') || path.endsWith('/mailbox-events')) return json(page([]))
     if (path.endsWith('/conversation')) {
       const sent = sends.at(-1)
       return json({ turns: [{ run_id: 'turn' + sends.length, message: sent.message, media_revision_id: sent.media_revision_id,
@@ -137,7 +131,6 @@ test('clarification goes to the waiting turn and its exchange survives reload', 
       expect(body.expected_state_version).toBe(7); reply = body.message
       return json({ run_id: 'q' })
     }
-    if (path.endsWith('/team-tasks') || path.endsWith('/mailbox-events') || path.endsWith('/projects/p/workflow-runs')) return json(page([]))
     if (path.endsWith('/conversation')) return json({ turns: [{ run_id: 'q', message: '处理一下', media_revision_id: 'm',
       status: reply ? 'SUCCEEDED' : 'AWAITING_INPUT', clarifications: reply ? [{ question, reply }] : [] }] })
     return json(reply ? { status: 'SUCCEEDED', phase: 'REVIEW' } :
@@ -287,6 +280,45 @@ test('upload sends bytes only to its signed URL, then completes with the returne
   expect(new Headers(put[1].headers).has('Authorization')).toBe(false)
   expect(JSON.parse(complete[1].body).parts).toEqual([{ part_number: 1, etag: 'digest' }])
   localStorage.clear()
+})
+
+test('shows the repaired revision and separates preview observations from export checks', async () => {
+  const range = (start_us, end_us) => ({ start_us, end_us })
+  const before = { media_revision_id: 'm', range: range(2_000_000, 3_000_000) }
+  const after = { media_revision_id: 'm', range: range(4_000_000, 5_000_000) }
+  vi.stubGlobal('fetch', vi.fn(async url => {
+    if (url.endsWith('/harness')) return json({
+      plan_generation: 1, index_generation_id: 'frozen', reference_count: 6, repair_count: 1, repair_limit: 2,
+    })
+    if (url.includes('/revisions/')) return json({ ...first, revision_no: 3 })
+    return json({ url: '/signed-mkv', kind: 'EXPORT', timeline_revision_id: 'r1', mime_type: 'video/x-matroska' })
+  }))
+  const wrapper = render(WorkflowTurn, {
+    turn: { run_id: 'repair', repair_count: 1 }, assets: [asset], active: true,
+    result: {
+      edit_project_id: 'e', revision_id: 'r1', export_artifact_id: 'final',
+      timeline_change: { position: 2, before, after, preserved_count: 1 },
+      shot_plan: { shots: [{ ...after, candidate_id: 'blue', reason: '核实到蓝色画面' }] },
+      review_report: {
+        output_kind: 'EXPORT', structural_checks: [{ status: 'PASSED' }], semantic_checks: [{ status: 'NOT_CHECKED' }],
+        coverage: { checked_times_us: [] }, issues: [],
+      },
+      preview_review: { semantic_checks: [{ status: 'PASSED' }], coverage: { checked_times_us: [5_000_000] } },
+    },
+  })
+  await flushPromises()
+  expect(wrapper.text()).toContain('版本 3')
+  expect(wrapper.text()).toContain('局部修复 1 次')
+  expect(wrapper.text()).toContain('保留其余 1 段')
+  expect(wrapper.get('[aria-label="镜头方案"]').text()).toContain('核实到蓝色画面')
+  expect(wrapper.get('[aria-label="审核覆盖"]').text()).toContain('语义 未检查')
+  expect(wrapper.get('[aria-label="审核覆盖"]').text()).toContain('预览语义 通过')
+  expect(wrapper.get('a[download]').attributes('href')).toBe('/signed-mkv')
+  const details = wrapper.get('details')
+  details.element.open = true
+  await details.trigger('toggle')
+  await flushPromises()
+  expect(details.text()).toContain('frozen')
 })
 
 test('a retried edit reuses the command key until its reply arrives', async () => {

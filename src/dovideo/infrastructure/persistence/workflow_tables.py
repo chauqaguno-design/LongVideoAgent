@@ -1,9 +1,24 @@
 """A run checkpoint and its sequenced events share one transaction."""
 
 from sqlalchemy import BigInteger, Column, ForeignKey, Integer, JSON, String, Table, UniqueConstraint
+from sqlalchemy.types import TypeDecorator
+
+from dovideo.application.workflow_checkpoint import Checkpoint
 from .edit_tables import identifier
 from .sqlalchemy import Base
 from .workspace_budget_table import workspace_budgets
+
+
+class CheckpointJSON(TypeDecorator):
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(self, value: Checkpoint, dialect):
+        # In-place mutations of nested lists/dicts do not trigger assignment validation.
+        return Checkpoint.model_validate(value).model_dump(mode="json")
+
+    def process_result_value(self, value, dialect):
+        return Checkpoint.model_validate(value)
 
 
 def define_v1(table):
@@ -18,7 +33,7 @@ def define_v1(table):
         Column("ready_at", BigInteger, nullable=False),
         Column("deadline", BigInteger, nullable=False),
         Column("state", JSON, nullable=False),
-        Column("checkpoint", JSON, nullable=False),
+        Column("checkpoint", CheckpointJSON(), nullable=False),
     )
 
     def run_ref():
@@ -52,25 +67,6 @@ def define_v1(table):
         Column("body", JSON, nullable=False),
     )
 
-    tasks = table(
-        "vm_team_tasks",
-        identifier("id", primary_key=True),
-        run_ref(),
-        Column("stage", String(24), nullable=False),
-        Column("position", Integer, nullable=False),
-        Column("body", JSON, nullable=False),
-        UniqueConstraint("run_id", "stage"),
-    )
-
-    mail = table(
-        "vm_team_mail",
-        identifier("id", primary_key=True),
-        run_ref(),
-        Column("seq", Integer, nullable=False),
-        Column("body", JSON, nullable=False),
-        UniqueConstraint("run_id", "seq"),
-    )
-
     model_requests = table(
         "vm_workflow_model_requests",
         identifier("id", primary_key=True),
@@ -82,30 +78,10 @@ def define_v1(table):
         Column("response", JSON(none_as_null=True)),
     )
 
-    attempts = table(
-        "vm_team_attempts",
-        identifier("id", primary_key=True),
-        run_ref(),
-        identifier("task_id"),
-        identifier("owner"),
-        Column("fence", Integer, nullable=False),
-        Column("start_at", BigInteger, nullable=False),
-        Column("end_at", BigInteger),
-        Column("outcome", String(20)),
-        UniqueConstraint("task_id", "fence"),
-    )
-
-    deliveries = table(
-        "vm_team_inbox",
-        identifier("id", primary_key=True),
-        run_ref(),
-        identifier("recipient"),
-        Column("expires", BigInteger, nullable=False),
-        Column("accepted", BigInteger),
-    )
-    return [runs, events, calls, documents, tasks, mail, model_requests, attempts, deliveries]
+    return [runs, events, calls, documents, model_requests]
 
 
 WORKFLOW_TABLES = define_v1(lambda name, *cols: Table(name, Base.metadata, *cols))
-runs, events, calls, documents, tasks, mail, model_requests, attempts, deliveries = WORKFLOW_TABLES
+runs, events, calls, documents, model_requests = WORKFLOW_TABLES
+model_requests.append_column(Column("request_fingerprint", String(64), nullable=False))
 WORKFLOW_TABLES.append(workspace_budgets)

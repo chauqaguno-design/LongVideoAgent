@@ -3,9 +3,7 @@ import math
 import pytest
 
 from dovideo.application.sparse_retrieval import BM25Retriever
-from dovideo.application.retrieval_documents import retrieval_document, tokenize, segment_identity
 from dovideo.application.rank_fusion import RankedCandidate, reciprocal_rank_fusion
-from dovideo.domain import VideoChunk, VideoSegment
 
 
 def rank(query, docs):
@@ -38,26 +36,6 @@ def test_empty_repeat_and_stable_ties():
     assert rank("foo foo", ["foo", "foo"]) == rank("foo", ["foo", "foo"])
     assert [c.index for c in rank("foo", ["foo", "foo"])] == [0, 1]
     assert rank("foo", ["foobar"]) == ()
-
-
-def test_document_deduplicates_summary_asr_ocr_and_present_keywords():
-    s = VideoSegment(start_ms=0, end_ms=60_000, transcript="FlashAttention-2 reduces memory.",
-                     ocr_texts=("FlashAttention-2 reduces memory.", "QKV"))
-    c = VideoChunk(start_ms=0, end_ms=300_000, segment_summary="FlashAttention-2 reduces memory.",
-                   keywords=("FlashAttention-2", "QKV", "new_term"), raw_segments=(s,))
-    doc = retrieval_document(c)
-    assert doc.count("flashattention-2") == 1
-    assert doc.count("qkv") == 1
-    assert "new_term" in doc
-    assert tokenize(doc).count("flashattention-2") == 1
-
-
-def test_legacy_identity_keeps_same_words_at_different_times():
-    a = VideoSegment(start_ms=0, end_ms=60_000, transcript="same")
-    b = a.model_copy(update={"start_ms": 60_000, "end_ms": 120_000})
-    assert segment_identity(a) == segment_identity(a.model_copy())
-    assert segment_identity(a) != segment_identity(b)
-    assert segment_identity(a) != segment_identity(a.model_copy(update={"transcript": "different"}))
 
 
 def candidates(*indexes):

@@ -8,29 +8,6 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 
 
-def create_or_adopt_table(name, *definition):
-    """Create a migration's table, or verify an existing unversioned copy."""
-    from alembic import op
-    from alembic.autogenerate import compare_metadata
-    from sqlalchemy import MetaData, Table, inspect
-
-    connection = op.get_bind()
-    if not inspect(connection).has_table(name):
-        op.create_table(name, *definition)
-        return
-    expected = MetaData()
-    # Reflection resolves the referenced tables needed to compare foreign keys.
-    expected.reflect(connection, only=[name])
-    expected.remove(expected.tables[name])
-    Table(name, expected, *definition)
-    context = MigrationContext.configure(connection, opts={
-        "include_object": lambda obj, key, kind, reflected, other: kind != "table" or key == name,
-        "compare_type": True,
-    })
-    if compare_metadata(context, expected):
-        raise RuntimeError(f"Existing {name} does not match the migration; inspect it before upgrading")
-
-
 def migration_config():
     root = Path(__file__).resolve().parents[4]
     if not (root / "alembic.ini").is_file():

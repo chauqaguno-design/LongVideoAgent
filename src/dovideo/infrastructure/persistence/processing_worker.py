@@ -20,7 +20,6 @@ from .processing_catalog import MediaCatalog, StaleAttempt, error, source_query
 from .processing_tables import records
 from .render_worker import media_binaries
 from .source_tables import sources
-from .object_parts_table import object_parts
 
 log = logging.getLogger(__name__)
 
@@ -134,19 +133,6 @@ class ProcessingWorker:
                 )
                 if not shared and row.digest:
                     cat.sources.blob(run.workspace, row.digest).unlink(missing_ok=True)
-                    if cat.sources.objects:
-                        objects = cat.sources.objects
-                        objects.client.remove_object(
-                            objects.bucket, objects.source_key(run.workspace, row.digest)
-                        )
-                if cat.sources.objects:
-                    cat.sources.objects.remove_parts(run.workspace, row.upload)
-                    cat.sources.objects.remove_prefix(f"videomind/processing/{run.workspace}/{run.asset}/")
-                    db.execute(
-                        delete(object_parts).where(
-                            object_parts.c.workspace == run.workspace, object_parts.c.upload == row.upload
-                        )
-                    )
             cat.commit(run, status="SUCCEEDED", stage="DELETED", completed=1, total=1)
             return
         with cat.sessions() as db:

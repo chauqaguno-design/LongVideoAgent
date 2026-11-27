@@ -1,12 +1,17 @@
 """Reserve an upper bound before sending a request; retain uncertain charges after interruption."""
 
 from copy import deepcopy
-import json
 import time
 from urllib.error import URLError
 from sqlalchemy import insert, select, update
 from dovideo.application.edit_timeline import EditError, uid
-from dovideo.application.workflow_state import NeedsInput, stable_id, task_label
+from dovideo.application.workflow_identity import (
+    context_estimate,
+    digest_json,
+    generation_key,
+    reserved_completion_tokens,
+)
+from dovideo.application.workflow_state import NeedsInput
 from .workflow_tables import model_requests as requests, runs
 from .workspace_budget_table import workspace_budgets
 
@@ -41,15 +46,81 @@ def workspace_balance(db, workspace, currency):
     return match, amount
 
 
-def reserve(repo, claim, step, messages, tool_defs, env):
+def review_budget_available(repo, row, env):
+    """Use the last review reservation as a preflight; the next actual request still reserves normally."""
+    usage = row.state["budget_usage"]
+    limits = usage["limits"]
+    currency = usage["currency"]
+    cap = int(env.get(f"DOVIDEO_WORKSPACE_{currency}_MAX_COST_MICROUNITS", "0"))
+    stage_limit = row.checkpoint.spec.stage_model_limit or int(
+        env.get("DOVIDEO_WORKFLOW_STAGE_MAX_MODEL_CALLS", limits["max_model_calls"])
+    )
+    with repo.sessions() as db:
+        prior = db.execute(
+            select(requests.c.price, requests.c.reserved).where(
+                requests.c.run_id == row.id,
+            )
+        ).all()
+        stage = [amount for price, amount in prior if price["budget_scope"] == "REVIEW"]
+        exposure = (
+            db.execute(
+                select(workspace_budgets.c.exposure).where(
+                    workspace_budgets.c.workspace == row.workspace_id,
+                    workspace_budgets.c.currency == currency,
+                )
+            ).scalar()
+            or 0
+        )
+    spent = sum(
+        usage[k] or 0 for k in ("committed_microunits", "reserved_microunits", "uncertain_microunits")
+    )
+    return len(stage) < stage_limit and max(stage, default=0) <= min(
+        cap - exposure,
+        limits["max_cost_microunits"] - spent,
+    )
+
+
+def reserve(repo, claim, step, messages, tool_defs, env, *, identity=None, snapshot=None):
+    key = generation_key(claim.checkpoint, step)
+    tool_hash = digest_json(tool_defs)
+    cp = claim.checkpoint
+    manifest = dict(
+        scope=cp.spec.scope.model_dump(mode="json"), index_generation_id=cp.spec.index_generation_id,
+        brief_id=cp.attempt.brief_id, timeline_revision_id=cp.attempt.revision_id or cp.attempt.base_id,
+        shot_plan_id=cp.attempt.shot_plan_id, references=cp.context.references,
+    )
+    context_hash = digest_json({"messages": messages, "manifest": manifest, "snapshot": snapshot})
     with repo.edits.write() as db:
         row = repo.guard(db, claim)
-        pred = (requests.c.run_id == row.id, requests.c.step == step)
+        phase = row.state["phase"]
+        estimate = context_estimate(messages, tool_defs, phase=phase, env=env)
+        completion_tokens = estimate["completion_tokens"]
+        fingerprint = digest_json(
+            {
+                "identity": identity,
+                "context_hash": context_hash,
+                "tools_hash": tool_hash,
+                "parameters": {"max_tokens": completion_tokens, "stream": False},
+            }
+        )
+        pred = (requests.c.run_id == row.id, requests.c.step == key)
         history = db.execute(select(requests).where(*pred)).all()
+        if any(request.request_fingerprint != fingerprint for request in history):
+            raise EditError(409, "MODEL_INPUT_CONFLICT", "逻辑步骤的模型输入已变化，请创建新的方案")
+        state = deepcopy(row.state)
         for request in history:
             if request.response is not None:
+                repo.trace(
+                    db,
+                    row,
+                    state,
+                    "model.replayed",
+                    request_id=request.id,
+                    logical_step=step,
+                    request_fingerprint=fingerprint,
+                    reason="persisted_response_matches",
+                )
                 return None, request.response
-        state = deepcopy(row.state)
         usage = state["budget_usage"]
         limits = usage["limits"]
         price = price_config(env, usage["currency"])
@@ -64,34 +135,23 @@ def reserve(repo, claim, step, messages, tool_defs, env):
                 usage["reserved_microunits"] -= prior.reserved
                 usage["uncertain_microunits"] += prior.reserved
                 db.execute(update(requests).where(requests.c.id == prior.id).values(status="UNCERTAIN"))
-        size = len(json.dumps([messages, tool_defs], ensure_ascii=False).encode()) + 1024
-        images = sum(
-            1
-            for message in messages
-            if isinstance(message.get("content"), list)
-            for part in message["content"]
-            if part.get("type") == "image_url"
-        )
-        reserved = cost(size + 2048 * images, price["input"]) + cost(512, price["output"])
+        images = estimate["images"]
+        input_bound = estimate["input_tokens"] + 1024
+        reserved = cost(input_bound, price["input"]) + cost(completion_tokens, price["output"])
         used = sum(usage[k] for k in ("committed_microunits", "reserved_microunits", "uncertain_microunits"))
         match, balance = workspace_balance(db, row.workspace_id, usage["currency"])
         setting = f"DOVIDEO_WORKSPACE_{usage['currency']}_MAX_COST_MICROUNITS"
         workspace_limit = int(env.get(setting, 0))
-        task_id = (
-            stable_id(row.id, task_label(row.state["phase"], row.checkpoint["turn"]))
-            if row.checkpoint["team"]
-            else None
+        prices = db.execute(select(requests.c.price).where(requests.c.run_id == row.id)).scalars()
+        stage_count = sum(item["budget_scope"] == phase for item in prices)
+        price.update(budget_scope=phase, completion_tokens=completion_tokens)
+        stage_limit = row.checkpoint.spec.stage_model_limit or int(
+            env.get("DOVIDEO_WORKFLOW_STAGE_MAX_MODEL_CALLS", limits["max_model_calls"])
         )
-        task_count = 0
-        if task_id:
-            prices = db.execute(select(requests.c.price).where(requests.c.run_id == row.id)).scalars()
-            task_count = sum(item.get("task_id") == task_id for item in prices)
-            price["task_id"] = task_id
-        task_limit = int(env.get("DOVIDEO_WORKFLOW_TASK_MAX_MODEL_CALLS", limits["max_model_calls"]))
         if (
             used + reserved > limits["max_cost_microunits"]
             or balance + reserved > workspace_limit
-            or (task_id and task_count >= task_limit)
+            or stage_count >= stage_limit
             or usage["model_calls"] >= limits["max_model_calls"]
             or usage["images"] + images > limits["max_images"]
         ):
@@ -100,13 +160,19 @@ def reserve(repo, claim, step, messages, tool_defs, env):
             return None, NeedsInput(
                 "本次调用将超出工作区、工作流或阶段预算，可缩小范围或调整额度。", kind="BUDGET"
             )
-        key = uid()
+        request_id = uid()
         usage["reserved_microunits"] += reserved
         usage["model_calls"] += 1
         usage["images"] += images
         db.execute(
             insert(requests).values(
-                id=key, run_id=row.id, step=step, price=price, reserved=reserved, status="PENDING"
+                id=request_id,
+                run_id=row.id,
+                step=key,
+                price=price,
+                reserved=reserved,
+                status="PENDING",
+                request_fingerprint=fingerprint,
             )
         )
         repo.trace(
@@ -114,17 +180,30 @@ def reserve(repo, claim, step, messages, tool_defs, env):
             row,
             state,
             "model.reserved",
-            request_id=key,
+            request_id=request_id,
+            logical_step=step,
+            physical_attempt=len(history) + 1,
+            request_fingerprint=fingerprint,
+            context_hash=context_hash,
+            tool_schema_hash=tool_hash,
+            skill=(snapshot or {}).get("skill"),
+            budget_scope=phase,
+            estimated_input_tokens=estimate["input_tokens"],
+            reserved_input_token_bound=input_bound,
+            context_estimator="lang-aware-plus-image-allowance",
+            completion_reserve_tokens=completion_tokens,
             images=images,
             reserved_microunits=reserved,
             price_version=price["version"],
         )
         db.execute(update(workspace_budgets).where(*match).values(exposure=balance + reserved))
-        return (key, reserved, price), None
+        return (request_id, reserved, price), None
 
 
-def run_model(repo, claim, step, messages, tool_defs, env, send, *, model=None):
-    reservation, previous = reserve(repo, claim, step, messages, tool_defs, env)
+def run_model(repo, claim, step, messages, tool_defs, env, send, *, model=None, identity=None, snapshot=None):
+    reservation, previous = reserve(
+        repo, claim, step, messages, tool_defs, env, identity=identity or {"model": model}, snapshot=snapshot
+    )
     if not reservation:
         if isinstance(previous, NeedsInput):
             raise previous
@@ -133,8 +212,14 @@ def run_model(repo, claim, step, messages, tool_defs, env, send, *, model=None):
     result = None
     failure = None
     start = time.monotonic()
+    # Carry the reserved limit into the existing zero-argument send callback.
+    token = reserved_completion_tokens.set(price["completion_tokens"])
     try:
         result = send()
+        for choice in (result or {}).get("choices") or []:
+            if isinstance(choice, dict) and isinstance(message := choice.get("message"), dict):
+                for field in ("reasoning_content", "reasoning", "reasoning_details", "analysis"):
+                    message.pop(field, None)
         return result
     except Exception as exc:
         timed_out = isinstance(exc, TimeoutError) or isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
@@ -143,6 +228,7 @@ def run_model(repo, claim, step, messages, tool_defs, env, send, *, model=None):
             raise EditError(503, failure, "模型请求超时，费用待核对。") from exc
         raise
     finally:
+        reserved_completion_tokens.reset(token)
         # Even after cancellation, this paid physical attempt belongs to its original run.
         latency_ms = int((time.monotonic() - start) * 1000)
         with repo.edits.write() as db:
@@ -169,12 +255,24 @@ def run_model(repo, claim, step, messages, tool_defs, env, send, *, model=None):
             else:
                 usage["uncertain_microunits"] += reserved
             repo.trace(
-                db, row, state, "model.failed" if failure else "model.returned", origin=claim,
-                request_id=key, step=step, resolved_model=model, error_code=failure,
+                db,
+                row,
+                state,
+                "model.failed" if failure else "model.returned",
+                origin=claim,
+                request_id=key,
+                step=step,
+                logical_step=step,
+                resolved_model=model,
+                error_code=failure,
                 latency_ms=latency_ms,
-                usage_known=known, input_tokens=inp if known else None, output_tokens=out if known else None,
-                currency=usage["currency"], price_version=price["version"],
-                charged_microunits=charged if known else None, uncertain_microunits=0 if known else reserved,
+                usage_known=known,
+                input_tokens=inp if known else None,
+                output_tokens=out if known else None,
+                currency=usage["currency"],
+                price_version=price["version"],
+                charged_microunits=charged if known else None,
+                uncertain_microunits=0 if known else reserved,
             )
             if state["cancel_requested_at"] and row.status in ("QUEUED", "RUNNING", "WAITING_JOB"):
                 repo.cancelled(db, row, state)

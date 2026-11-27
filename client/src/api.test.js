@@ -25,7 +25,7 @@ function authEnvironment() {
 test('stale 401 cannot log out a newer login even when the token text repeats', async () => {
   const env = authEnvironment()
   setAuthToken('A')
-  const request = apiRequest('/media/list')
+  const request = apiRequest('/v1/projects')
   clearAuthToken()
   setAuthToken('A')
   env.resolve(new Response('expired', { status: 401 }))
@@ -37,7 +37,7 @@ test('stale 401 cannot log out a newer login even when the token text repeats', 
 test('current authenticated 401 expires current session once', async () => {
   const env = authEnvironment()
   setAuthToken('A')
-  const request = apiRequest('/media/list')
+  const request = apiRequest('/v1/projects')
   env.resolve(new Response('expired', { status: 401 }))
   assert.equal((await request).status, 401)
   assert.equal(env.storage.has('authToken'), false)
@@ -51,7 +51,7 @@ test('late 401 JSON body cannot survive a new login after expiration', async () 
   const started = new Promise(resolve => { bodyStarted = resolve })
   const body = new Promise(resolve => { resolveBody = resolve })
   setAuthToken('A')
-  const request = apiRequest('/media/list')
+  const request = apiRequest('/v1/projects')
   env.resolve({ status: 401, headers: new Headers({ 'content-type': 'application/json' }),
     clone: () => ({ json: () => { bodyStarted(); return body } }) })
   await started
@@ -67,12 +67,10 @@ test('logout and cross-tab token change invalidate outstanding successful respon
     const env = authEnvironment()
     setAuthToken('A')
     const session = captureAuthSession()
-    const request = apiRequest('/media/list')
+    const request = apiRequest('/v1/projects')
     mutate(env)
     env.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }))
     await assert.rejects(request, { name: 'AbortError' })
     assert.equal(session.isCurrent(), false)
   }
 })
-
-

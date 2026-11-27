@@ -46,7 +46,6 @@ class SearchEncoder:
     def __init__(self, url, cache, *, index=None):
         self.url, self.cache = url, Path(cache)
         self.index = index
-        self.write_guard = None
         self.http = build_opener(ProxyHandler({}))
 
     def call(self, path, body=None):
@@ -85,12 +84,7 @@ class SearchEncoder:
             raise ValueError("编码空间或维度有误")
         return vectors
 
-    def prepare(self, workspace, rows):
-        def guard():
-            if self.write_guard:
-                return self.write_guard(workspace, {r["media_revision_id"] for r in rows})
-            return nullcontext()
-
+    def prepare(self, workspace, rows, *, publication=nullcontext):
         spaces = self.call("/spaces")
         prepared = {}
         for space, model in spaces.items():
@@ -112,7 +106,7 @@ class SearchEncoder:
                     else:
                         items.append(value)
                 encoded = self.encode(space, model, items)
-                with guard():
+                with publication():
                     for (target, _), vec in zip(batch, encoded, strict=True):
                         target.parent.mkdir(parents=True, exist_ok=True)
                         with NamedTemporaryFile(dir=target.parent, delete=False) as f:
@@ -128,13 +122,13 @@ class SearchEncoder:
                     vec.frombytes(self.vector_path(workspace, model, key).read_bytes())
                     batch.append(point(row, vec))
                     if len(batch) == 64:
-                        with guard():
+                        with publication():
                             self.index.write(model, batch)
                         batch = []
                 if batch:
-                    with guard():
+                    with publication():
                         self.index.write(model, batch)
-        with guard():
+        with publication():
             self.freeze_spaces(workspace, rows, prepared)
         return prepared
 

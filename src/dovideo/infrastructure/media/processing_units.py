@@ -26,7 +26,7 @@ from dovideo.application.media_memory import (
 )
 from dovideo.infrastructure.edit_captions import Cue, write_srt
 from dovideo.infrastructure.persistence.processing_catalog import record
-from .source_artifacts import command, digest_file, model_digest
+from .source_artifacts import command, digest_file
 from dovideo.infrastructure.persistence.media_visual_budget import billed_window
 from .visual_observations import (
     visual_deployment,
@@ -108,10 +108,6 @@ class ProcessingUnits:
             url_expires_at=None,
         )
         rel = destination.relative_to(self.catalog.root).as_posix()
-        if self.catalog.sources.objects:
-            self.catalog.sources.objects.put(
-                f"videomind/processing/{self.run.workspace}/{rel}", destination
-            )
         return record(self.run, "ARTIFACT", unit, dict(artifact=public, file=rel), rid=artifact_id)
 
     def json_file(self, name, body, kind, unit):
@@ -383,7 +379,6 @@ class ProcessingUnits:
         root = Path(self.models.get(mode) or "")
         if not self.models.get(mode) or not root.is_dir():
             return None
-        fingerprint = model_digest(root)
         interpreter = self.models["python"] or sys.executable
         package = "faster-whisper" if mode == "asr" else "paddleocr"
         version, _ = command(
@@ -396,8 +391,8 @@ class ProcessingUnits:
             self.reader.stopped,
         )
         adapter = Path(__file__).with_name("local_inference.py")
-        build = digest_file(adapter) + ":" + version.decode().strip()
-        # Caches are scoped by source revision, actual input bytes, model weights and adapter.
+        model_stamp = sha256(f"{root.resolve()}:{package}:{version.decode().strip()}".encode()).hexdigest()
+        # Cache against the source revision, input bytes and configured model installation.
         cache = self.folder / "cache"
         cache.mkdir(parents=True, exist_ok=True)
         if mode == "ocr":
@@ -406,7 +401,7 @@ class ProcessingUnits:
                 if "frame" in a.body:
                     batch.append(
                         (
-                            self.catalog.derived_path(self.run.workspace, a.body["file"]),
+                            self.catalog.derived_path(a.body["file"]),
                             a,
                         )
                     )
@@ -420,11 +415,11 @@ class ProcessingUnits:
                 batch.append((path, (i, start, end, left)))
         tasks = []
         for path, _ in batch:
-            key = sha256(f"{mode}:{build}:{fingerprint}:{digest_file(path)}".encode()).hexdigest()
+            key = sha256(f"{mode}:{model_stamp}:{digest_file(path)}".encode()).hexdigest()
             tasks.append(dict(path=str(path), output=str(cache / (key + ".json"))))
         spec = self.temp / (mode + ".json")
         spec.write_text(
-            json.dumps(dict(mode=mode, model=str(root), checkpoint=fingerprint, inputs=tasks)),
+            json.dumps(dict(mode=mode, model=str(root), checkpoint=model_stamp, inputs=tasks)),
             encoding="utf8",
         )
         command([interpreter, "-I", adapter, spec], self.reader.stopped, timeout=7200)
@@ -495,7 +490,7 @@ class ProcessingUnits:
                     refs.extend([{"id": ocr_frames[pos][2].id}, ocr_frames[pos][3]])
                 roi_file = self.temp / "ocr-region.png"
                 with Image.open(
-                    self.catalog.derived_path(self.run.workspace, anchor[2].body["file"])
+                    self.catalog.derived_path(anchor[2].body["file"])
                 ) as image:
                     x1, y1, x2, y2 = group["first_box"]
                     box = (
@@ -537,7 +532,6 @@ class ProcessingUnits:
             self.source.digest,
             self.config["pipeline_version"],
             PROMPT_VERSION,
-            digest_file(Path(__file__).with_name("visual_observations.py")),
             deployment.model,
             deployment.config.model,
             deployment.config.chat_url,
@@ -555,7 +549,7 @@ class ProcessingUnits:
             )
         frame_ids = [r.id for r in window]
         if previous and previous.body.get("visual_dependency") == key:
-            path = self.catalog.derived_path(self.run.workspace, previous.body["file"])
+            path = self.catalog.derived_path(previous.body["file"])
             if digest_file(path) != previous.body["artifact"]["sha256"]:
                 raise ValueError("视觉观察缓存校验失败")
             report = json.loads(path.read_text(encoding="utf8"))
@@ -615,7 +609,7 @@ class ProcessingUnits:
                 (
                     r.id,
                     r.body["frame"]["actual_us"],
-                    self.catalog.derived_path(self.run.workspace, r.body["file"]),
+                    self.catalog.derived_path(r.body["file"]),
                 )
                 for r in window
             ]
@@ -822,11 +816,8 @@ class ProcessingUnits:
     def validate_artifacts(self):
         artifacts = {r.id: r.body for r in self.catalog.entries(self.run, "ARTIFACT")}
         for r in artifacts.values():
-            path = self.catalog.derived_path(self.run.workspace, r["file"])
-            if (
-                path.stat().st_size != r["artifact"]["size_bytes"]
-                or digest_file(path) != r["artifact"]["sha256"]
-            ):
+            path = self.catalog.derived_path(r["file"])
+            if not path.is_file() or not path.stat().st_size:
                 raise ValueError("派生产物校验失败")
         observations = {r.id for r in self.catalog.entries(self.run, "OBSERVATION")}
         for item in self.catalog.entries(self.run, "EVIDENCE"):

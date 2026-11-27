@@ -16,14 +16,6 @@ DEFAULT_BUDGET = dict(
     currency="CNY",
     deadline_seconds=900,
 )
-STAGES = (
-    ("PLAN", "COORDINATOR"),
-    ("MATERIAL", "MATERIAL"),
-    ("PROPOSE", "EDITOR"),
-    ("COMMIT", "COORDINATOR"),
-    ("RENDER", "COORDINATOR"),
-    ("REVIEW", "REVIEWER"),
-)
 
 
 def utc(epoch):
@@ -32,10 +24,6 @@ def utc(epoch):
 
 def stable_id(run_id, label):
     return str(uuid5(UUID(run_id), label))
-
-
-def task_label(phase, turn):
-    return phase if not turn else f"{phase}:{turn}"
 
 
 def public_error(code, message, retryable=False):

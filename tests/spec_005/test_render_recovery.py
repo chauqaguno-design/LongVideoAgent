@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import func, select
 
 from dovideo.application.edit_sources import EditSources
 from dovideo.application.edit_timeline import uid
@@ -16,11 +16,11 @@ from dovideo.infrastructure.persistence.edit_repository import EditRepository, j
 from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES, artifacts, jobs
 from dovideo.infrastructure.persistence.render_worker import RenderWorker
 from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
+from dovideo.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
 
 
 def repository(root):
-    engine = create_engine("sqlite:///" + (root / "recovery.db").as_posix())
+    engine = create_sqlalchemy_engine("sqlite:///" + (root / "recovery.db").as_posix())
     return engine, EditRepository(EditSources(engine, root))
 
 
@@ -86,9 +86,6 @@ def test_restart_publishes_only_one_verified_artifact_set(tmp_path):
     assert {k for k,_ in published} == {"EXPORT","VALIDATION_REPORT","COMPILED_TIMELINE"}
     assert all(p.startswith(f"{jid}/2/") for _,p in published)
     assert len(published) == 3
-    from dovideo.infrastructure.persistence.edit_cleanup import cleanup_files
-    leftovers = cleanup_files(store, older_than_seconds=0, apply=True)
-    assert any(p.startswith(f"renders/{jid}/1/") for p in leftovers)
     assert all((worker.root / p).is_file() for _, p in published)
     engine.dispose()
 

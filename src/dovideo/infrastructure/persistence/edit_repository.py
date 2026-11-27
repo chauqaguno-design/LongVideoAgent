@@ -141,7 +141,7 @@ class EditRepository:
             return dict(items=[view(r) for r in rows[:limit]],
                         next_cursor=str(rows[limit-1]._mapping[sort_key]) if len(rows) > limit else None)
 
-    def patch(self, workspace, edit_id, body, *, guard=None, brief_id=None):
+    def patch(self, workspace, edit_id, body, *, guard=None, brief_id=None, validate_result=None):
         def save(db):
             parent = one(db, owned(projects, workspace, edit_id).with_for_update())
             if parent.head != body["expected_revision"]:
@@ -177,7 +177,10 @@ class EditRepository:
                     if crop["x"] + crop["width"] > width or crop["y"] + crop["height"] > height:
                         raise invalid("裁剪框超出显示画面")
 
-            rev, assignments = apply_patch(load_rev(parent.head_revision_id), body["operations"], load_rev, check_clip)
+            before = load_rev(parent.head_revision_id)
+            rev, assignments = apply_patch(before, body["operations"], load_rev, check_clip)
+            if validate_result is not None:
+                validate_result(before, rev)
             self.sources.require_readable(db, workspace, checked)
             if brief_id is not None:
                 rev["source_brief_id"] = brief_id

@@ -109,11 +109,11 @@ def test_uploaded_source_query_image_grounded_quote_and_delete(tmp_path, monkeyp
         hit = client.post("/v1/search", json=by_image).json()["hits"][0]
         assert hit["range"]["end_us"] - hit["range"]["start_us"] >= 1_000_000
         pic = service.answer(ws, str(uuid4()), by_image)
-        proof = client.get("/v1/evidence/" + pic["claims"][0]["evidence_ids"][0])
-        assert proof.status_code == 200 and proof.json()["support"] == "SUPPORTED", proof.text
-        assert set(proof.json()["artifact_ids"]) == {fid, image["artifact_id"]}
-        edit_proof = client.app.state.edit_worker.repo.resolve_evidence(ws, proof.json()["evidence_id"])
-        assert edit_proof == proof.json()
+        assert pic["claims"] and all(claim["support"] == "UNCERTAIN" for claim in pic["claims"])
+        proof = client.get("/v1/evidence/" + hit["evidence_ids"][0])
+        proof.raise_for_status()
+        assert proof.json()["artifact_ids"] == [fid]
+        assert proof.json()["support"] == "NOT_CHECKED"
         client.delete(f"/v1/assets/{aid}").raise_for_status()
         assert client.get("/v1/evidence/" + proof.json()["evidence_id"]).status_code == 404
         assert client.get(full["url"]).status_code == 404

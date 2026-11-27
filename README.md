@@ -1,29 +1,45 @@
 # ReelCue · 镜寻剪辑台
 
-ReelCue 是一个可以边查边剪的视频工作台。选中一部视频，输入“哪一段说了『Wait a minute』？”，点时间戳回看原片。接着说“把刚才第一段剪出来”“前面再留两秒，然后导出”，工作台会沿用这次选中的片段和剪辑版本。
+ReelCue 是一个本地优先的长视频多模态检索与粗剪工作台。上传视频后自动提取时间对齐的字幕、语音、画面文字与采样帧；你可以用自然语言查找台词或无声画面，核实原片时间戳后直接在版本化时间线上粗剪、预览并导出成片。
 
-## 在工作台里能做什么
+## 核心架构
 
-- **上传和读笔记。** 在「素材处理」上传视频，查看处理阶段和缺口。观影笔记把已取得的字幕、转写、画面文字和画面观察关联到原片时间。
-- **查台词和画面。** 在「检索片段」输入文字，或上传截图并圈选局部。候选带有原片区间和证据，可以回看，也可以加入时间线。对已提取的内嵌字幕，可按原文核查出现次数和范围。
-- **在对话里交代任务。** 每段对话选定一部原片。系统判断需要检索、核对画面还是生成剪辑，并显示执行计划。查到多个符合的片段时，可回复“第 2 段”继续。
-- **调整和导出。** 在聊天中要求调整起止点，也可以在「时间线」手动排列片段、设置原声或静音、添加字幕。预览和导出都绑定到具体版本，默认成片为 MP4，也可选择 WebM 或 MKV。
+零重型中间件依赖（无需 MySQL / Redis / RabbitMQ / MinIO），默认本机单进程启动：
 
-当前动作复核最多检查检索返回的三个候选。查询全片首次出现或总次数时，可以从结果中查看实际覆盖范围。[检索和证据说明](docs/development/search.md)
+```text
+Vue 3 前端（对话工作台 / 播放器 / 时间线）
+              │ HTTP + SSE
+              ▼
+FastAPI 应用进程（本地 SQLite WAL + 本地磁盘 + 可选 Qdrant）
+  ├─ 素材离线处理：分片续传 → FFprobe PTS 校准 → 播放代理 / 抽帧 / 字幕 / Whisper / OCR / 向量
+  ├─ 多路混合检索：词法检索 + 空间图像特征 + 可选 Qdrant 向量（RRF 融合）
+  └─ 单协调器工作流状态机（PLAN → MATERIAL → PROPOSE → COMMIT → RENDER → REVIEW）
+        ├─ 只读工具隔离与工作区/素材作用域鉴权
+        ├─ 持久化 Checkpoint + Worker 租约防崩溃双写 + 幂等键
+        ├─ 不可变版本化时间线（expected_revision 乐观锁 + 回滚）
+        └─ FFmpeg 预览/导出渲染 + 独立上下文语义验收与最多 2 轮有界局部替换
+```
 
-## 本地启动
+- **单机即可跑通**：本地 SQLite（WAL 模式）保存账号、媒体索引版本、对话检查点、预算账本与时间线快照；原片、代理与成片直读本地磁盘；Qdrant 支持本地文件目录或独立服务。
+- **确定性上下文与成本控制**：大工具结果落库、入窗截断预览，上下文超限时保留冻结约束与授权引用编号并支持前后 15 秒按需回读；模型调用前先做预算预扣与额度结算。
 
-准备 Python 3.12、Node.js 22.12 或以上版本，以及 PATH 中的 FFmpeg 和 ffprobe。下例使用 Windows PowerShell，默认在本机保存媒体与任务。
+更多模块设计与数据流见 [系统架构说明](docs/ARCHITECTURE.md)。
+
+## 1 分钟本地启动
+
+需要 **Python 3.12+**、**Node.js 22.12+**，以及 PATH 中的 **FFmpeg / ffprobe**（或通过 `DOVIDEO_FFMPEG_DIR` 指定目录）。
+
+### 1. 启动后端
 
 ```powershell
 git clone https://github.com/chauqaguno-design/LongVideoAgent.git ReelCue
 cd ReelCue
 py -3.12 -m venv .venv
-.venv/Scripts/python -m pip install -c constraints-py312.txt -e ".[test]"
-.venv/Scripts/python -m uvicorn dovideo.presentation.api.app:create_app --factory --host 127.0.0.1 --port 8173
+.\.venv\Scripts\python.exe -m pip install -c constraints-py312.txt -e ".[test]"
+.\.venv\Scripts\python.exe -m uvicorn dovideo.presentation.api.app:create_app --factory --host 127.0.0.1 --port 8173 --workers 1
 ```
 
-另开终端，在仓库根目录执行前端命令。
+### 2. 启动前端
 
 ```powershell
 cd client
@@ -32,22 +48,31 @@ $env:VITE_DEV_PROXY_TARGET = 'http://127.0.0.1:8173'
 npm run dev -- --host 127.0.0.1 --port 5175
 ```
 
-打开工作台后，注册本地账号，创建素材项目。在「素材处理」上传一段带内嵌字幕的视频，待索引发布后就可以在「对话与任务」里查台词并剪辑。[打开本地工作台](http://127.0.0.1:5175/)
+打开 `http://127.0.0.1:5175/` 注册本地账号、创建项目并上传视频，待索引发布后即可检索台词、预览并导出（支持 MP4 / MKV / WebM）。
 
-纯本地模式可以读取内嵌字幕、处理明确时间段并运行剪辑。语音转写、OCR、向量编码和在线画面复核需要各自的模型或服务。配置示例列出对应的环境变量。[配置示例](.env.example) · [运行与恢复](docs/development/operations.md)
+- 完整启动步骤与可选本地向量编码服务见 [本地快速开始](docs/QUICK_START.md)。
+- 可选本地 Whisper / PaddleOCR / Qdrant 及在线视觉模型配置见 [环境变量示例](.env.example)。
 
-## 代码与验证
-
-前端使用 Vue 3 和 Vite，API 使用 FastAPI。Python 工作流持久化对话、候选证据、预算和版本，FFmpeg 负责预览与成片。[对话路由与工作流](docs/development/workflow.md) · [前端与浏览器测试](client/README.md)
+## 验证与测试
 
 ```powershell
-.venv/Scripts/python -m pytest -q
+# 后端回归与迁移零漂移检查
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m compileall -q src scripts alembic
+
+# 前端单测、组件测试与生产构建
 cd client
 npm test
 npm run test:components
 npm run build
 ```
 
-## 项目来源与许可
+## 当前能力边界
 
-ReelCue 基于 Morimi-Kazuha 的 VideoMind 继续开发。前端沿用了 DOVideo-AI 的部分代码，原始 MIT 版权声明为 Copyright (c) 2026 Majst。[上游 VideoMind](https://github.com/Morimi-Kazuha/VideoMind) · [前端来源](client/NOTICE.md) · [MIT 许可](LICENSE) · [第三方声明与字体许可](THIRD_PARTY_NOTICES.md)
+- **纯本地离线模式**：无需外部 API Key，可完成分片上传、内嵌字幕读取、明确时间段与精确台词剪辑、版本回滚及 FFmpeg 导出。
+- **可选多模态增强**：语音转写（Faster-Whisper）、画面识字（PaddleOCR）、语义/以图搜帧向量（Qdrant + 本地编码器）及在线视觉复核需按 `.env.example` 配置对应本地权重或 OpenAI 兼容模型接口。
+- **已知边界**：当前离线视觉观察默认关闭以控制费用；在线候选复核每次默认最多检查前 3 个候选区间，小时级长视频的镜头级抽帧、动态变焦复核与持久化全文索引正在后续迭代规划中。
+
+## 来源与许可
+
+ReelCue 基于开源项目 [VideoMind](https://github.com/Morimi-Kazuha/VideoMind) 重构演进，前端包含部分 DOVideo-AI 代码。详情见 [MIT 许可](LICENSE)、[前端声明](client/NOTICE.md) 与 [第三方许可](THIRD_PARTY_NOTICES.md)。

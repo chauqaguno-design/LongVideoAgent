@@ -10,7 +10,7 @@ const props = defineProps({ projectId: String, assets: Array, draft: Object })
 const emit = defineEmits(['edited', 'media-library'])
 const root = '/projects/' + props.projectId
 const history = ref([]), selected = ref(''), turns = ref([]), titles = ref({})
-const run = ref(null), result = ref(null), tasks = ref([]), mail = ref([]), events = ref([])
+const run = ref(null), result = ref(null), events = ref([])
 const media = ref(props.draft?.scope?.media_revision_ids?.[0] || ''), message = ref(props.draft?.message || '')
 const limits = ref({}), reason = ref(''), error = ref(''), channel = ref(''), busy = ref(false)
 const optimistic = ref(null), submit = makeCommand()
@@ -44,16 +44,15 @@ function remember(id) {
 function stop() { controller?.abort(); clearTimeout(timer) }
 async function snapshot(id, signal) {
   const path = '/workflow-runs/' + id
-  const [state, thread, team, messages] = await Promise.all([
+  const [state, thread] = await Promise.all([
     request(path, undefined, signal), request(path + '/conversation', undefined, signal),
-    listAll(path + '/team-tasks', signal), listAll(path + '/mailbox-events', signal),
   ])
   const output = state.result_artifact_id ? await request(path + '/result', undefined, signal) : null
   if (signal.aborted || selected.value !== id) return
   turns.value = thread.turns
   for (const turn of thread.turns) titles.value[turn.run_id] = turn.message
   media.value = thread.turns.at(-1)?.media_revision_id || ''
-  run.value = state; result.value = output; tasks.value = team; mail.value = messages
+  run.value = state; result.value = output
   optimistic.value = null
 }
 async function follow(id, signal) {
@@ -82,7 +81,7 @@ async function follow(id, signal) {
 }
 function select(id, keepTurns = false) {
   stop(); selected.value = id; remember(id)
-  run.value = null; result.value = null; events.value = []; tasks.value = []; mail.value = []
+  run.value = null; result.value = null; events.value = []
   cursor = ''; channel.value = ''; error.value = ''; reason.value = ''
   if (!keepTurns) { turns.value = []; optimistic.value = null; message.value = '' }
   if (!id) return
@@ -176,10 +175,6 @@ onUnmounted(() => { mounted = false; stop() })
         <button v-if="pending(run) || waiting" class="edit-link" :disabled="busy" @click="command(() => changeRun('cancel'))">取消任务</button></p>
       <p v-if="run.error" role="alert">{{ run.error.message }}</p>
       <button v-if="run.status === 'FAILED' && run.error?.retryable" :disabled="busy" @click="command(() => changeRun('retry'))">重试本轮</button>
-      <details v-if="tasks.length"><summary>角色分工和进度</summary>
-        <ul><li v-for="task in tasks" :key="task.task_id">{{ label(task.role) }} · {{ label(task.status) }} · 第 {{ task.attempt }} 次 · {{ task.depends_on.length }} 项前置任务</li></ul>
-        <ol><li v-for="item in mail" :key="item.message_id">{{ item.summary }}</li></ol>
-      </details>
       <details v-if="events.length"><summary>任务记录</summary><ol><li v-for="e in events" :key="e.event_id">{{ e.payload.summary || e.payload.message || label(e.payload.phase || e.payload.status || e.type) }}</li></ol></details>
       <details v-if="run.budget_usage"><summary>用量与预算</summary>
         <p>模型 {{ run.budget_usage.model_calls }} 次 · 工具 {{ run.budget_usage.tool_calls }} 次 · 图片 {{ run.budget_usage.images }} 张</p>

@@ -17,8 +17,9 @@ def billed_window(catalog, run, unit, payload_bytes, images, env, send):
         workspace_limit = int(env["DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS"])
     except (NeedsInput, KeyError, ValueError):
         raise ValueError("视觉调用缺少定价或费用上限") from None
-    # Count the serialized image bytes conservatively, plus a separate image allowance.
-    reserved = cost(payload_bytes + images * 2048, price["input"]) + cost(768, price["output"])
+    # The serialized payload includes the JPEG data. Bound text separately from the images.
+    text_tokens = min(payload_bytes, 4096)
+    reserved = cost(text_tokens + images * 2048, price["input"]) + cost(768, price["output"])
     entry = record(
         run,
         "VISUAL_CHARGE",

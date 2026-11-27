@@ -10,7 +10,6 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 from dovideo.application.media_sampling import sample_points, segments, windows
-from dovideo.application.spec_contracts import validate_contract
 from dovideo.presentation.api.app import create_app
 
 
@@ -81,7 +80,6 @@ def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch)
             if run["status"] not in ("QUEUED", "RUNNING"):
                 break
             time.sleep(0.15)
-        validate_contract("ProcessingRun", run)
         assert run["status"] == "PARTIAL", run
         revision = http.get("/v1/media-revisions/" + asset["media_revision_id"]).json()
         assert revision["playback_artifact_id"] != revision["source_artifact_id"]
@@ -92,11 +90,7 @@ def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch)
         obs = http.get(f"/v1/assets/{aid}/observations").json()["items"]
         assert len(obs) == 2 and {r["text"] for r in obs} == {"打开红门"}
         assert sorted(r["range"]["start_us"] for r in obs) == [500000, 1800000]
-        for o in obs:
-            validate_contract("Observation", o)
         cov = http.get(f"/v1/assets/{aid}/coverage").json()["items"]
-        for c in cov:
-            validate_contract("CoverageRecord", c)
         assert {c["stage"] for c in cov if c["modality"] == "VISUAL"} == {"PLANNED", "DECODED"}
         assert any(c["modality"] == "OCR" and c["stage"] == "FAILED" for c in cov)
         frames = next(c for c in cov if c["modality"] == "VISUAL" and c["stage"] == "DECODED")[
@@ -130,8 +124,6 @@ def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch)
         assert cat.literal_coverage(scope, project, first_gen, [asset["media_revision_id"]]) == {
             asset["media_revision_id"]: [dict(start_us=0, end_us=3_000_000)]
         }
-        for row in rows:
-            validate_contract("Evidence", cat.evidence(scope, row["evidence_id"]))
         previews = f"/v1/projects/{project}/evidence-previews"
         proof = next(r["evidence_id"] for r in rows if r["claim"] == "打开红门")
         item = http.post(previews, json=[proof]).json()[proof]

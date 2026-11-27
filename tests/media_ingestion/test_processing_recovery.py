@@ -5,11 +5,10 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import time
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, update
+from sqlalchemy import update
 from dovideo.application.edit_sources import EditSources
 from dovideo.infrastructure.media.source_artifacts import digest_file
 from dovideo.infrastructure.persistence.processing_catalog import StaleAttempt
@@ -19,13 +18,12 @@ from dovideo.infrastructure.persistence.outbox_tables import inbox, outbox
 from dovideo.infrastructure.persistence.edit_repository import EditRepository
 from dovideo.infrastructure.persistence.workflow_tables import runs as workflow_runs
 from dovideo.infrastructure.persistence.work_outbox import WorkOutbox
-from dovideo.infrastructure.persistence.edit_cleanup import abandoned_media_files
 from dovideo.infrastructure.persistence.source_tables import projects, sources
-from dovideo.infrastructure.persistence.sqlalchemy import Base
+from dovideo.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
 
 
 def worker_at(root):
-    engine = create_engine(f"sqlite:///{(root/'jobs.db').resolve().as_posix()}")
+    engine = create_sqlalchemy_engine(f"sqlite:///{(root/'jobs.db').resolve().as_posix()}")
     Base.metadata.create_all(
         engine, tables=[projects, sources, runs, records, outbox, inbox, workflow_runs]
     )
@@ -108,10 +106,6 @@ def test_committed_frame_survives_crash_and_late_output_is_fenced(tmp_path, monk
     )
     retry = cat.claim()
     assert retry.id == old.id and retry.attempt == 2
-    with cat.sessions() as db:
-        retired = list(abandoned_media_files(cat.sources.root, db, time.time()+1))
-    assert any(path.name.startswith(".attempt-") for path in retired)
-    assert any(path.suffix == ".jpg" for path in retired)
     with pytest.raises(StaleAttempt):
         cat.commit(old, stage="LATE")
     worker.perform(retry)

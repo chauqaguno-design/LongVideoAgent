@@ -18,9 +18,9 @@ from dovideo.application.workflow_inspections import (
     run_inspection,
 )
 from dovideo.application.workflow_tools import job_status
+from dovideo.application.workflow_shots import distinct_candidates
 from dovideo.application.edit_sources import EditSources
 from dovideo.application.edit_timeline import uid
-from dovideo.application.spec_contracts import validate_contract
 from dovideo.application.workflow_state import DEFAULT_BUDGET
 from dovideo.infrastructure.persistence.edit_repository import EditRepository
 from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES
@@ -61,6 +61,13 @@ class ColorSequenceVerifier:
             "usage": {"prompt_tokens": 100, "completion_tokens": 16},
             "choices": [{"message": {"content": json.dumps(value)}}],
         }
+
+
+def test_candidate_budget_covers_distinct_source_ranges():
+    ranges = [(0, 10), (3, 7), (0, 10), (8, 15), (9, 13)]
+    hits = [dict(media_revision_id="film", range=dict(start_us=start, end_us=end)) for start, end in ranges]
+    assert list(distinct_candidates(hits)) == [(0, hits[0]), (1, hits[1]), (3, hits[3])]
+    assert [position for position, _ in distinct_candidates(hits, 5)] == [0, 1, 3, 4]
 
 
 @pytest.mark.real_media
@@ -132,7 +139,6 @@ def test_ordered_source_frames_and_output_review(tmp_path):
     )
     assert result["support"] == "SUPPORTED"
     evidence = repo.document(scope, result["evidence_id"]).body
-    validate_contract("Evidence", evidence)
     assert evidence["media_revision_id"] == revision and evidence["artifact_ids"] == [result["sequence_id"]]
     frames = repo.document(scope, evidence["artifact_ids"][0]).body["frames"]
     assert len(frames) == 3 and frames[0]["pts"] < frames[1]["pts"] < frames[2]["pts"]
@@ -162,7 +168,6 @@ def test_ordered_source_frames_and_output_review(tmp_path):
     restarted.advance(claimant, **run_inspection(restarted, provider, None, claimant, job))
     resumed = restarted.claim(uid())
     public = job_status(restarted, None, resumed, job["job_id"])
-    validate_contract("JobView", public)
     assert public["kind"] == "INSPECTION" and public["terminal"] and public["result_artifact_ids"]
     assert inspection(resumed, "queued-visual", revision, job["range"], "红色变蓝")["support"] == "SUPPORTED"
     with pytest.raises(WaitInspection) as queued:

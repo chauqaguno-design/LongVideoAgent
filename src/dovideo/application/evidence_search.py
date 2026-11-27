@@ -4,20 +4,20 @@ import hashlib
 import json
 import logging
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
-from functools import partial
 from uuid import UUID, uuid4, uuid5
 
 from fastapi import HTTPException
-from PIL import Image, ImageChops
 
+from dovideo.application.instruction_text import QUOTES, quoted_literal
 from dovideo.application.rank_fusion import RankedCandidate, reciprocal_rank_fusion
 from dovideo.application.media_sampling import segment_bounds
-from dovideo.application.retrieval_documents import normalize_text
+from dovideo.application.sparse_retrieval import normalize_text
 from dovideo.application.sparse_retrieval import BM25Retriever
-from dovideo.application.spec_contracts import validate_contract
+from dovideo.application.workflow_state import NeedsInput
+from dovideo.infrastructure.persistence.edit_repository import EditRepository
 from dovideo.infrastructure.search_artifacts import SearchArtifacts
-from dovideo.infrastructure.search_cleanup import scoped_write
 from dovideo.infrastructure.search_features import (
     PIXEL_SPACE,
     descriptor,
@@ -45,38 +45,31 @@ def playback_range(row, bounds, duration=None):
     return time_range(max(bounds["start_us"], span["start_us"]), min(bounds["end_us"], span["end_us"]))
 
 
-def split_coverage(requested, checked):
-    """Clip and union checked ranges, then subtract them from each requested interval."""
+def coverage(requested, *, run_id=None, protocol=None, checked=None):
+    """Summarize scanned intervals and the gaps between them."""
+    checked = checked or {}
     verified, gaps = [], []
     for item in requested:
         mid, bounds = item["media_revision_id"], item["range"]
-        cursor, stop = bounds["start_us"], bounds["end_us"]
-        merged = []
-        for r in sorted(checked.get(mid, []), key=lambda x: x["start_us"]):
-            start, end = max(cursor, r["start_us"]), min(stop, r["end_us"])
-            if start >= end:
+        begin, stop = bounds["start_us"], bounds["end_us"]
+        cursor, merged = begin, []
+        for span in sorted(checked.get(mid, ()), key=lambda r: r["start_us"]):
+            start, end = max(begin, span["start_us"]), min(stop, span["end_us"])
+            if start >= end or end <= cursor:
                 continue
-            if merged and start <= merged[-1]["end_us"]:
-                merged[-1]["end_us"] = max(end, merged[-1]["end_us"])
+            if start > cursor:
+                gaps.append(dict(media_revision_id=mid, range=time_range(cursor, start)))
+            if merged and start <= cursor:
+                merged[-1]["end_us"] = end
             else:
                 merged.append(time_range(start, end))
-        for r in merged:
-            if cursor < r["start_us"]:
-                gaps.append(dict(media_revision_id=mid, range=time_range(cursor, r["start_us"])))
-            verified.append(dict(media_revision_id=mid, range=r))
-            cursor = r["end_us"]
+            cursor = end
+        verified.extend(dict(media_revision_id=mid, range=span) for span in merged)
         if cursor < stop:
             gaps.append(dict(media_revision_id=mid, range=time_range(cursor, stop)))
-    return verified, gaps
-
-
-def coverage(requested, *, run_id=None, protocol=None, checked=None):
-    verified, gaps = split_coverage(requested, checked or {})
-    status = "UNASSESSED" if not run_id else "PARTIAL"
-    if run_id and requested and not gaps:
-        status = "PROTOCOL_COMPLETE"
+    complete = bool(requested) and not gaps
     return dict(
-        status=status,
+        status=("PROTOCOL_COMPLETE" if complete else "PARTIAL") if run_id else "UNASSESSED",
         query_run_id=run_id,
         protocol_id=protocol,
         requested_ranges=requested,
@@ -87,12 +80,45 @@ def coverage(requested, *, run_id=None, protocol=None, checked=None):
 
 
 def query_literal(text):
-    """Only an explicit quote/subtitle instruction defines an exhaustive text-search protocol."""
-    match = re.search(r'["“「『](.+?)["”」』]', text)
-    if match:
-        return match.group(1).strip()
+    """Extract an explicit quote or a literal marked by a dialogue label."""
+    if match := QUOTES.search(text):
+        return quoted_literal(match[0]) or None
     match = re.match(r"^(?:字幕|台词|对白|subtitle|quote)\s*[:：]\s*(.+)$", text, re.I)
     return match.group(1).strip() if match else None
+
+
+SUBTITLE_PROTOCOL = "embedded-subtitle-literal-v1"
+
+
+def subtitle_literal(request):
+    text = request.get("text") or ""
+    if not request.get("image_artifact_id") and ("字幕" in text or "subtitle" in text.lower()):
+        return query_literal(text)
+    return None
+
+
+def exclude_subtitles(hits, words, rows, coverage):
+    """Keep hits whose complete subtitle scan shows none of the excluded words."""
+    needles = [normalize_text(word) for word in words]
+    blocked = {}
+    for row in rows:
+        if row["source"] == "embedded-subtitle" and any(word in normalize_text(row["claim"]) for word in needles):
+            blocked.setdefault(row["media_revision_id"], []).append(row["range"])
+    keep, has_gap = [], False
+    for hit in hits:
+        mid, span = hit["media_revision_id"], hit["range"]
+        covered = any(
+            c["start_us"] <= span["start_us"] and span["end_us"] <= c["end_us"] for c in coverage.get(mid, ())
+        )
+        if not covered:
+            has_gap = True
+        elif not any(overlap(span, cue) for cue in blocked.get(mid, ())):
+            keep.append(hit)
+    if hits and not keep:
+        if has_gap:
+            raise NeedsInput("部分候选区间缺少可完整核对的内嵌字幕，无法确认排除条件。请提供字幕或指定区间。")
+        raise NeedsInput("匹配的片段均与要求排除的字幕重叠，请修改包含或排除条件。", kind="CONSTRAINT_CONFLICT")
+    return keep
 
 
 @dataclass
@@ -109,13 +135,20 @@ class EvidenceSearch:
     def __init__(self, sources, catalog, encoder=None):
         self.sources, self.catalog, self.encoder = sources, catalog, encoder
         self.files = SearchArtifacts(sources)
-        if encoder:
-            encoder.write_guard = partial(scoped_write, sources)
 
     def prepare_rows(self, workspace, rows):
         if self.encoder:
+            edits = EditRepository(self.sources)
+            revisions = {row["media_revision_id"] for row in rows}
+
+            @contextmanager
+            def publication():
+                with edits.write() as db:
+                    self.sources.require_readable(db, workspace, revisions)
+                    yield
+
             try:
-                return self.encoder.prepare(workspace, rows)
+                return self.encoder.prepare(workspace, rows, publication=publication)
             except (OSError, ValueError, KeyError, QdrantVectorError) as exc:
                 logging.getLogger(__name__).warning(
                     "Embedding projection unavailable (%s)", type(exc).__name__
@@ -129,74 +162,7 @@ class EvidenceSearch:
         if self.encoder and self.encoder.index:
             self.encoder.index.close()
 
-    def verify_picture(self, workspace, run_id, image_id, plan, result):
-        _, query = read_query_image(self.files.image(workspace, plan.project, image_id))
-        roi = self.files.roi(workspace, plan.project, image_id)
-        candidates = {row["evidence_id"]: row for row in plan.rows}
-        inspected = set()
-        matches = []
-        for hit in result["hits"][:8]:
-            for eid in hit["evidence_ids"]:
-                row = candidates[eid]
-                frame = row.get("frame")
-                if not frame or not row.get("path") or frame["artifact_id"] in inspected:
-                    continue
-                if len(inspected) >= 8:
-                    return matches
-                inspected.add(frame["artifact_id"])
-                try:
-                    with Image.open(row["path"]) as src:
-                        pixels = src.convert("RGB")
-                except OSError:
-                    continue
-                if roi:
-                    if list(pixels.size) != roi["original_size"]:
-                        continue
-                    box = roi["roi"]
-                    x, y, w, h = (box[k] for k in ("x", "y", "width", "height"))
-                    pixels = pixels.crop((x, y, x + w, y + h))
-                equal = pixels.size == query.size and ImageChops.difference(pixels, query).getbbox() is None
-                if not equal:
-                    continue
-                actual = frame["actual_us"]
-                verified_id = str(uuid5(UUID(run_id), eid + ":exact-rgb"))
-                proof = dict(
-                    evidence_id=verified_id,
-                    workspace_id=workspace,
-                    project_id=plan.project,
-                    media_revision_id=row["media_revision_id"],
-                    range=time_range(actual, actual + 1),
-                    claim=f"{actual / 1e6:.3f} 秒处的源帧{'选区' if roi else ''}与查询截图的 RGB 像素相同",
-                    support="SUPPORTED",
-                    observation_ids=row["observation_ids"],
-                    artifact_ids=[image_id, frame["artifact_id"]]
-                    + ([roi["parent_artifact_id"]] if roi else []),
-                    verification_protocol="exact-rgb-v1/" + run_id,
-                    index_generation_id=None,
-                )
-                payload = dict(
-                    run_id=run_id,
-                    source_generation=plan.generation,
-                    source_evidence_id=eid,
-                    evidence=proof,
-                )
-                self.files.save(
-                    workspace,
-                    plan.project,
-                    json.dumps(payload, ensure_ascii=False).encode(),
-                    "QUERY_EVIDENCE",
-                    "application/json",
-                    [row["media_revision_id"]],
-                    ident=verified_id,
-                )
-                matches.append(proof)
-        return matches
-
-    def plan(self, workspace, request):
-        try:
-            validate_contract("SearchRequest", request)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+    def plan(self, workspace, request, *, generation_id=None):
         project = request["scope"]["project_id"]
         self.sources.project(workspace, project)
         if not (request.get("text") or "").strip() and not request.get("image_artifact_id"):
@@ -232,7 +198,9 @@ class EvidenceSearch:
             dict(media_revision_id=mid, range=bounds or time_range(0, duration))
             for mid, duration in durations.items()
         ]
-        generation, snapshot = self.catalog.search_scope(workspace, project, list(durations))
+        generation, snapshot = self.catalog.search_scope(
+            workspace, project, list(durations), generation_id=generation_id
+        )
         # Scope the inputs before scoring, and pin one generation for every retrieval route.
         rows = self.scoped_rows(workspace, project, ranges, snapshot)
         signature = [
@@ -377,8 +345,8 @@ class EvidenceSearch:
             result_artifact_id=None,
         )
 
-    def search(self, workspace, request):
-        plan = self.plan(workspace, request)
+    def search(self, workspace, request, *, generation_id=None):
+        plan = self.plan(workspace, request, generation_id=generation_id)
         result = self.rank(workspace, request, plan)
         self.recheck_scope(workspace, plan)
         return result
@@ -388,21 +356,21 @@ class EvidenceSearch:
         for item in plan.requested:
             self.sources.media(workspace, item["media_revision_id"])
 
-    def answer(self, workspace, run_id, request):
-        request_hash = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+    def answer(self, workspace, run_id, request, *, generation_id=None):
+        request_identity = (
+            request if generation_id is None else dict(request, index_generation_id=generation_id)
+        )
+        request_hash = hashlib.sha256(json.dumps(request_identity, sort_keys=True).encode()).hexdigest()
         frozen = self.files.scan(workspace, run_id, request_hash)
         if frozen and frozen.answer:
             return frozen.answer
         plan = None
         if not frozen:
-            plan = self.plan(workspace, request)
+            plan = self.plan(workspace, request, generation_id=generation_id)
             result = self.rank(workspace, request, plan)
             checked = self.catalog.literal_coverage(
-                workspace,
-                plan.project,
-                plan.generation,
-                [r["media_revision_id"] for r in plan.requested],
-            )
+                workspace, plan.project, plan.generation, [r["media_revision_id"] for r in plan.requested]
+            ) if subtitle_literal(request) else {}
             frozen = self.files.freeze(
                 workspace,
                 run_id,
@@ -442,44 +410,26 @@ class EvidenceSearch:
         mode = request["query_mode"]
         text = request.get("text") or ""
         literal = query_literal(text)
-        subtitle_protocol = (
-            literal
-            and not request.get("image_artifact_id")
-            and ("字幕" in text or "subtitle" in text.lower())
-        )
-        protocol = "embedded-subtitle-literal-v1" if subtitle_protocol else "candidate-review-v1"
-        if subtitle_protocol:
-            # An unresolved subtitle observation leaves a gap in this particular literal scan.
-            conflicts = {}
-            for row in plan.rows:
-                if (
-                    row.get("source") == "embedded-subtitle"
-                    and row["support"] != "SUPPORTED"
-                    and normalize_text(literal) in normalize_text(row["claim"])
-                ):
-                    conflicts.setdefault(row["media_revision_id"], []).append(row["range"])
-            known = [dict(media_revision_id=mid, range=r) for mid, spans in checked.items() for r in spans]
-            _, clear = split_coverage(known, conflicts)
-            checked = {}
-            for item in clear:
-                checked.setdefault(item["media_revision_id"], []).append(item["range"])
+        subtitle_scan = bool(subtitle_literal(request))
+        protocol = SUBTITLE_PROTOCOL if subtitle_scan else "candidate-review-v1"
+        checked = checked if subtitle_scan else {}
         summary = coverage(
-            plan.requested,
-            run_id=run_id,
-            protocol=protocol,
-            checked=checked if subtitle_protocol else {},
+            plan.requested, run_id=run_id, protocol=protocol, checked=checked,
         )
         selected = {e for h in result["hits"] for e in h["evidence_ids"]}
         claims, events = [], []
-        build = {}
+        build, uncertain_times = {}, []
+        needle = normalize_text(literal) if literal else ""
         for row in plan.rows:
             # A caption directly supports text it contains; a frame candidate alone cannot prove an action.
             source = row.get("source")
-            exact = bool(literal and normalize_text(literal) in normalize_text(row["claim"]))
+            exact = bool(needle and needle in normalize_text(row["claim"]))
+            if subtitle_scan and exact and source == "embedded-subtitle" and row["support"] != "SUPPORTED":
+                uncertain_times.append(row["range"]["start_us"])
             supported = (
                 exact
                 and row["support"] == "SUPPORTED"
-                and (source == "embedded-subtitle" or (not subtitle_protocol and source == "faster-whisper"))
+                and (source == "embedded-subtitle" or (not subtitle_scan and source == "faster-whisper"))
             )
             if supported:
                 key = (row["media_revision_id"], normalize_text(row["claim"]))
@@ -519,12 +469,15 @@ class EvidenceSearch:
         if events and not request.get("image_artifact_id"):
             claims = [
                 claim for claim in claims
-                if claim["support"] != "UNCERTAIN" or normalize_text(literal) in normalize_text(claim["text"])
+                if claim["support"] != "UNCERTAIN" or needle in normalize_text(claim["text"])
             ]
-        complete = summary["status"] == "PROTOCOL_COMPLETE"
+        gaps = summary["unverified_ranges"]
+        complete = bool(plan.requested) and not (gaps or uncertain_times)
         warnings = list(result["warnings"])
-        if not complete:
+        if gaps:
             warnings.append("未核查的源时间区间列于覆盖记录中")
+        if uncertain_times:
+            warnings.append("部分字幕匹配尚未确认，统计仅包含已有依据的匹配")
         count, qualifier, artifact_id = None, None, None
         if mode != "LOCAL":
             count, qualifier = (
@@ -553,22 +506,11 @@ class EvidenceSearch:
             )
         if mode == "FIRST" and events:
             first = min(events, key=lambda e: e["range"]["start_us"])
-            first_complete = complete
-            if subtitle_protocol:
-                # FIRST requires the prefix through this occurrence; suffix gaps still limit the count.
-                prefix = [
-                    dict(
-                        media_revision_id=r["media_revision_id"],
-                        range=time_range(
-                            r["range"]["start_us"],
-                            min(r["range"]["end_us"], first["range"]["end_us"]),
-                        ),
-                    )
-                    for r in plan.requested
-                    if r["range"]["start_us"] < first["range"]["end_us"]
-                ]
-                prefix_summary = coverage(prefix, run_id=run_id, protocol=protocol, checked=checked)
-                first_complete = prefix_summary["status"] == "PROTOCOL_COMPLETE"
+            end = first["range"]["end_us"]
+            first_complete = subtitle_scan and not (
+                any(gap["range"]["start_us"] < end for gap in gaps)
+                or any(t < end for t in uncertain_times)
+            )
             claims.insert(
                 0,
                 dict(
@@ -602,27 +544,6 @@ class EvidenceSearch:
             answer = "找到了可回看的候选片段，现有证据尚不足以确认所问事件。"
         else:
             answer = "在已建立索引的素材中没有找到相关证据。"
-        if mode == "LOCAL" and request.get("image_artifact_id"):
-            proofs = self.verify_picture(workspace, run_id, request["image_artifact_id"], plan, result)
-            if proofs:
-                answer = proofs[0]["claim"] + "。"
-                claims = [
-                    dict(
-                        text=e["claim"],
-                        evidence_ids=[e["evidence_id"]],
-                        support="SUPPORTED",
-                    )
-                    for e in proofs
-                ]
-                checked = {}
-                for e in proofs:
-                    checked.setdefault(e["media_revision_id"], []).append(e["range"])
-                summary = coverage(
-                    plan.requested,
-                    run_id=run_id,
-                    protocol="exact-rgb-v1",
-                    checked=checked,
-                )
         claims = list({tuple(c["evidence_ids"]): c for c in claims}.values())
         return dict(
             run_id=run_id,

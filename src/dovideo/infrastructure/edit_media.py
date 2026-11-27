@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -21,6 +22,19 @@ RENDERER_VERSION = "videomind-ffmpeg-v3"
 CODECS = {"mp4": ("libx264", "aac", "h264", "aac", "mov_text"),
           "mkv": ("libx264", "flac", "h264", "flac", "srt"),
           "webm": ("libaom-av1", "libopus", "av1", "opus", "webvtt")}
+
+
+def media_binaries(environ=None):
+    values = os.environ if environ is None else environ
+    directory = values.get("DOVIDEO_FFMPEG_DIR") or values.get("FFMPEG_DIR")
+    binaries = {}
+    for tool in ("ffmpeg", "ffprobe"):
+        prefix = f"DOVIDEO_{tool.upper()}"
+        configured = values.get(prefix) or values.get(f"{prefix}_PATH")
+        if not configured and directory:
+            configured = shutil.which(tool, path=directory)
+        binaries[tool] = configured or tool
+    return binaries
 
 
 def output_frame(duration_us, fps):

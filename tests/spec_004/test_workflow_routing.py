@@ -28,6 +28,7 @@ from dovideo.application.workflow_routing import (
         ("怎么剪辑视频？", "QUESTION", ("SEARCH", "ANSWER")),
         ("教我如何把刚才的片段导出", "QUESTION", ("SEARCH", "ANSWER")),
         ("你怎么看这部电影的剪辑？", "QUESTION", ("SEARCH", "ANSWER")),
+        ("上一版剪辑讲了什么？", "QUESTION", ("SEARCH", "ANSWER")),
         ("画面里谁跟谁在做什么？", "INSPECT", ("SEARCH", "INSPECT", "ANSWER")),
         ("请检查他们俩是不是在交谈", "INSPECT", ("SEARCH", "INSPECT", "ANSWER")),
         ("剪第1至3秒", "EDIT", ("EDIT", "PREVIEW")),

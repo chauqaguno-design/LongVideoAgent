@@ -1,30 +1,16 @@
-"""Small asynchronous Qdrant vector-index adapter.
-
-The adapter intentionally uses an injectable JSON HTTP boundary rather than a
-Qdrant SDK.  The default client wraps the standard-library urllib call in
-``asyncio.to_thread``; importing or constructing this module never performs a
-network request.
-"""
+"""Qdrant JSON transport and collection initialization."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import inspect
 import json as jsonlib
 import math
 import re
-import uuid
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Mapping, Protocol
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
-
-from dovideo.application.value_objects import VectorHit
-from dovideo.application.errors import BudgetExceededError
-from dovideo.application.follow_up_budget import record_request_component
-from dovideo.domain import VideoChunk
-
 
 DEFAULT_QDRANT_URL = "http://localhost:6333"
 DEFAULT_QDRANT_COLLECTION = "video_chunks"
@@ -154,197 +140,6 @@ class QdrantVectorIndex:
     def collection_ready(self) -> bool:
         return self._collection_ready
 
-    @property
-    def ready(self) -> bool:
-        """Short compatibility spelling for health/status adapters."""
-
-        return self._collection_ready
-
-    async def upsert(
-        self,
-        media_id: int,
-        chunks: tuple[VideoChunk, ...],
-    ) -> None:
-        """Upsert only chunks that have a non-empty embedding."""
-
-        if not self.enabled:
-            return
-        vectorized = tuple(chunk for chunk in chunks if chunk.embedding)
-        if not vectorized:
-            return
-        try:
-            dimension = len(vectorized[0].embedding)
-            await self._ensure_collection(dimension)
-            for chunk in vectorized:
-                if len(chunk.embedding) != dimension:
-                    raise QdrantVectorError("Qdrant vector dimensions do not match")
-            points = [
-                {
-                    "id": point_id(media_id, chunk),
-                    "vector": list(chunk.embedding),
-                    "payload": {
-                        "mediaId": media_id,
-                        "startMs": chunk.start_ms,
-                        "endMs": chunk.end_ms,
-                        **(
-                            {"sourceRevision": chunk.source_revision}
-                            if chunk.source_revision
-                            else {}
-                        ),
-                        **(
-                            {"chunkId": chunk.chunk_id}
-                            if chunk.chunk_id
-                            else {}
-                        ),
-                        **(
-                            {"chunkingVersion": chunk.chunking_version}
-                            if chunk.chunking_version else {}
-                        ),
-                    },
-                }
-                for chunk in vectorized
-            ]
-            response = await self._send(
-                "PUT",
-                f"/collections/{self.collection}/points?wait=true",
-                {"points": points},
-            )
-            _require_success(response, "upsert")
-        except (asyncio.CancelledError, BudgetExceededError):
-            raise
-        except Exception as exc:
-            self._reset_ready()
-            if isinstance(exc, QdrantVectorError):
-                raise
-            raise QdrantVectorError("Qdrant vector upsert failed") from exc
-
-    async def search(
-        self,
-        media_id: int,
-        query_embedding: tuple[float, ...],
-        *,
-        limit: int,
-        source_revision: str | None = None,
-        chunking_version: str | None = None,
-    ) -> tuple[VectorHit, ...]:
-        """Search one media ID and parse payload ranges into ``VectorHit``."""
-
-        if not self.enabled or not query_embedding:
-            return ()
-        if isinstance(limit, bool) or not isinstance(limit, int):
-            raise TypeError("Qdrant search limit must be an integer")
-        if limit <= 0:
-            return ()
-        try:
-            await self._ensure_collection(len(query_embedding))
-            body = {
-                "query": list(query_embedding),
-                "filter": {
-                    "must": [
-                        {
-                            "key": "mediaId",
-                            "match": {"value": media_id},
-                        }
-                    ]
-                },
-                "limit": limit,
-                "with_payload": True,
-            }
-            for key, value in (("sourceRevision", source_revision), ("chunkingVersion", chunking_version)):
-                if value is not None:
-                    body["filter"]["must"].append({"key": key, "match": {"value": value}})
-            record_request_component("qdrant_query")
-            response = await self._send(
-                "POST",
-                f"/collections/{self.collection}/points/query",
-                body,
-            )
-            _require_success(response, "search")
-            body_value = response.body
-            if not isinstance(body_value, Mapping):
-                raise QdrantVectorError("Qdrant search response shape is invalid")
-            result = body_value.get("result")
-            if isinstance(result, Mapping):
-                points = result.get("points")
-            elif isinstance(result, list):
-                # Accept the already-unwrapped shape used by a few local
-                # fakes, while retaining Java's empty/missing-result behavior.
-                points = result
-            elif result is None:
-                points = None
-            else:
-                raise QdrantVectorError("Qdrant search result shape is invalid")
-            if points is None:
-                return ()
-            if not isinstance(points, list):
-                raise QdrantVectorError("Qdrant search points shape is invalid")
-            hits: list[VectorHit] = []
-            for point in points:
-                if not isinstance(point, dict):
-                    continue
-                payload = point.get("payload")
-                if not isinstance(payload, dict):
-                    continue
-                try:
-                    start_ms = _payload_int(payload, "startMs", "start_ms")
-                    end_ms = _payload_int(payload, "endMs", "end_ms")
-                    score = float(point.get("score", 0.0))
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                source_revision = _payload_text(
-                    payload,
-                    "sourceRevision",
-                    "source_revision",
-                )
-                chunk_id = _payload_text(payload, "chunkId", "chunk_id")
-                hits.append(
-                    VectorHit(
-                        start_ms=start_ms,
-                        end_ms=end_ms,
-                        score=score,
-                        source_revision=source_revision,
-                        chunk_id=chunk_id,
-                        chunking_version=_payload_text(payload, "chunkingVersion", "chunking_version"),
-                    )
-                )
-            return tuple(hits)
-        except (asyncio.CancelledError, BudgetExceededError):
-            raise
-        except Exception as exc:
-            self._reset_ready()
-            if isinstance(exc, QdrantVectorError):
-                raise
-            raise QdrantVectorError("Qdrant vector search failed") from exc
-
-    async def delete_media(self, media_id: int) -> None:
-        """Best-effort media cleanup, matching Java's delete semantics."""
-
-        if not self.enabled:
-            return
-        body = {
-            "filter": {
-                "must": [
-                    {
-                        "key": "mediaId",
-                        "match": {"value": media_id},
-                    }
-                ]
-            }
-        }
-        try:
-            response = await self._send(
-                "POST",
-                f"/collections/{self.collection}/points/delete?wait=true",
-                body,
-            )
-            _require_success(response, "delete")
-        except (asyncio.CancelledError, BudgetExceededError):
-            raise
-        except Exception:
-            # Java deliberately does not make cleanup failure fail the media
-            # operation.  In particular, do not invalidate collection_ready.
-            return
-
     async def _ensure_collection(self, dimension: int) -> None:
         if dimension <= 0:
             raise QdrantVectorError("Qdrant vector dimension must be positive")
@@ -378,7 +173,7 @@ class QdrantVectorIndex:
                 _require_success(created, "collection creation")
                 self._collection_dimension = dimension
                 self._collection_ready = True
-            except (asyncio.CancelledError, BudgetExceededError):
+            except asyncio.CancelledError:
                 raise
             except Exception:
                 self._reset_ready()
@@ -423,7 +218,7 @@ class QdrantVectorIndex:
                 **{body_keyword: body},
                 timeout=self.timeout_seconds,
             )
-        except (asyncio.CancelledError, BudgetExceededError):
+        except asyncio.CancelledError:
             raise
         except Exception as exc:
             raise QdrantVectorError(
@@ -437,33 +232,6 @@ class QdrantVectorIndex:
     def _reset_ready(self) -> None:
         self._collection_ready = False
         self._collection_dimension = None
-
-
-def point_id(media_id: int | None, chunk: VideoChunk) -> str:
-    """Return a deterministic point ID, namespaced for new source revisions."""
-
-    media_text = "null" if media_id is None else str(media_id)
-    if chunk.source_revision:
-        source = (
-            f"{media_text}:{chunk.source_revision}:{chunk.start_ms}:"
-            f"{chunk.end_ms}:{chunk.chunk_id}"
-        )
-    else:
-        # Preserve the frozen R0-R4 point identity for legacy chunks that do
-        # not yet carry provenance metadata.
-        source = f"{media_text}:{chunk.start_ms}:{chunk.end_ms}"
-    return java_name_uuid_from_bytes(source.encode("utf-8"))
-
-
-def java_name_uuid_from_bytes(value: bytes) -> str:
-    """Reproduce Java's MD5/version-3 name UUID exactly."""
-
-    digest = bytearray(hashlib.md5(value).digest())
-    digest[6] &= 0x0F
-    digest[6] |= 0x30
-    digest[8] &= 0x3F
-    digest[8] |= 0x80
-    return str(uuid.UUID(bytes=bytes(digest)))
 
 
 async def _coerce_response(value: Any) -> JsonHttpResponse:
@@ -488,7 +256,7 @@ async def _coerce_response(value: Any) -> JsonHttpResponse:
                     body = json_method()
                     if inspect.isawaitable(body):
                         body = await body
-                except (asyncio.CancelledError, BudgetExceededError):
+                except asyncio.CancelledError:
                     raise
                 except Exception as exc:
                     raise QdrantVectorError(
@@ -571,43 +339,3 @@ def _dimension_value(value: Any) -> int:
     if dimension <= 0:
         raise QdrantVectorError("Qdrant collection dimension is invalid")
     return dimension
-
-
-def _payload_int(payload: Mapping[str, Any], *keys: str) -> int:
-    for key in keys:
-        if key in payload:
-            value = payload[key]
-            if isinstance(value, bool):
-                raise TypeError("payload timestamp must be an integer")
-            return int(value)
-    return 0
-
-
-def _payload_text(payload: Mapping[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = payload.get(key)
-        if isinstance(value, str):
-            return value.strip()
-    return ""
-
-
-# Java migration spelling; the application port remains ``VectorIndexPort``.
-QdrantVectorStore = QdrantVectorIndex
-
-
-__all__ = [
-    "AsyncJsonHttpClient",
-    "COLLECTION_NAME_PATTERN",
-    "DEFAULT_QDRANT_COLLECTION",
-    "DEFAULT_QDRANT_TIMEOUT_SECONDS",
-    "DEFAULT_QDRANT_URL",
-    "JsonHttpResponse",
-    "QdrantError",
-    "QdrantInfrastructureError",
-    "QdrantVectorError",
-    "QdrantVectorIndex",
-    "QdrantVectorStore",
-    "StdlibAsyncJsonHttpClient",
-    "java_name_uuid_from_bytes",
-    "point_id",
-]

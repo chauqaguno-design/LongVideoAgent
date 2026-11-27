@@ -11,7 +11,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from dovideo.application.edit_instructions import exclude_subtitles, literal_plan
+from dovideo.application.edit_instructions import literal_plan
+from dovideo.application.evidence_search import exclude_subtitles
 from dovideo.application.workflow_state import NeedsInput
 from dovideo.presentation.api.app import create_app
 
@@ -36,7 +37,6 @@ def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_pat
     if not ffmpeg:
         pytest.skip("FFmpeg required")
     monkeypatch.setenv("DOVIDEO_WORKFLOW_LIVE_MODEL", "0")
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_TEAM", "false")
 
     def ff(*args):
         return subprocess.run(
@@ -128,11 +128,12 @@ def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_pat
             pytest.fail("The edit workflow did not reach a terminal or clarification state")
 
         revision = upload(source)
-        instruction = "总时长2秒，保留讲话，包含字幕「Ticket」，排除字幕「spoiler」，并导出"
+        instruction = "总时长2.5秒，保留讲话，包含字幕「Ticket」，排除字幕「spoiler」，并导出"
         state, result = edit(revision, instruction, "combined")
         assert state["status"] == "SUCCEEDED", state
         brief = result["brief"]
-        assert brief["duration_target_us"] == 2_000_000 and brief["audio_policy"] == "KEEP_SOURCE"
+        assert brief["duration_target_us"] == 2_500_000 and brief["duration_tolerance_us"] == 2_000_000
+        assert brief["audio_policy"] == "KEEP_SOURCE"
         assert (
             brief["must_include"] == ["Ticket"]
             and brief["must_exclude"] == ["spoiler"]
@@ -186,7 +187,7 @@ def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_pat
             )
 
         for text, media, key, reason in (
-            (instruction.replace("2秒", "4秒"), revision, "duration", "目标 4 秒"),
+            (instruction.replace("2.5秒", "5秒"), revision, "duration", "目标 5 秒"),
             (
                 instruction.replace("排除字幕「spoiler」", "排除字幕「Ticket」"),
                 revision,

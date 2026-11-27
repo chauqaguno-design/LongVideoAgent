@@ -11,8 +11,10 @@ from fastapi.responses import FileResponse
 from starlette.formparsers import MultiPartException, MultiPartParser
 
 from dovideo.application.evidence_search import EvidenceSearch
+from dovideo.application.spec_contracts import SearchRequest
 from dovideo.infrastructure.search_features import MAX_IMAGE_BYTES, read_query_image
 from .edit_sources import signature, utc
+from .schemas import Crop
 
 
 def install_search_routes(app, require_user):
@@ -89,18 +91,15 @@ def install_search_routes(app, require_user):
     def crop_query(
         project_id: UUID,
         image_id: UUID,
-        body: dict,
+        body: Crop,
         request: Request,
         scope=Depends(workspace),
     ):
-        keys = ("x", "y", "width", "height")
-        if set(body) != set(keys) or any(type(body[k]) is not int for k in keys):
-            raise HTTPException(422, "裁图需要以像素指定 x、y、width、height")
-        x, y, w, h = (body[k] for k in keys)
+        x, y, w, h = (body[k] for k in ("x", "y", "width", "height"))
         project = str(project_id)
         data = search.files.image(scope, project, str(image_id))
         _, original = read_query_image(data)
-        if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > original.width or y + h > original.height:
+        if x + w > original.width or y + h > original.height:
             raise HTTPException(422, "裁图范围超出原图")
         png = BytesIO()
         original.crop((x, y, x + w, y + h)).save(png, "PNG")
@@ -124,7 +123,7 @@ def install_search_routes(app, require_user):
         return artifact(scope, child, request)
 
     @router.post("/search")
-    def find(body: dict, scope=Depends(workspace)):
+    def find(body: SearchRequest, scope=Depends(workspace)):
         return search.search(scope, body)
 
     @router.get("/projects/{project_id}/query-results/{artifact_id}/occurrences")

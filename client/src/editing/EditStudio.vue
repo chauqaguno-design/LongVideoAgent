@@ -104,7 +104,7 @@ async function saveTitle() {
       </div>
     </details>
     <p v-if="error" role="alert">{{ error }} <button @click="load()">重试</button></p>
-    <EditProject v-if="projectId" :key="projectId + ':' + navigation" :project-id="projectId" :library="library"
+    <EditProject v-if="projectId" :key="projectId + ':' + navigation" :project-id="projectId"
       :initial-edit="initialEdit" @selected="rememberEdit" />
     <p v-else-if="!busy && !error">创建项目后，在素材处理中添加第一部视频。</p>
     <details @toggle="$event.target.open && inspectQueues()"><summary>工作区服务状态</summary>

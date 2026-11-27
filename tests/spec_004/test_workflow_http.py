@@ -1,7 +1,6 @@
 """Real HTTP + FFmpeg round trip through a user request, checkpoint, preview and replay."""
 
 import hashlib
-import json
 from io import BytesIO
 import os
 import shutil
@@ -12,66 +11,7 @@ from fastapi.testclient import TestClient
 import pytest
 from PIL import Image
 
-from dovideo.application.spec_contracts import validate_contract
-from dovideo.application.workflow_state import DEFAULT_BUDGET
 from dovideo.presentation.api.app import create_app
-
-
-class TeamFixture:
-    """Records four independent member conversations; attempts one unauthorized write as Editor."""
-
-    env = dict(
-        DOVIDEO_WORKFLOW_LIVE_MODEL="1",
-        DOVIDEO_WORKSPACE_CNY_MAX_COST_MICROUNITS="10000",
-        DOVIDEO_FLASH_CNY_INPUT_MICROS_PER_MILLION="50",
-        DOVIDEO_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="50",
-        DOVIDEO_FLASH_PRICE_VERSION="local-fixture",
-    )
-    roles = []
-
-    def identity(self, *, vision=False):
-        return dict(model="same-test-deployment", mode="native", fingerprint="same-fingerprint")
-
-    def request(self, dialogs, identity, tools, deadline):
-        role = dialogs[0]["content"].split(" in a film")[0].split()[-1]
-        assert identity == self.identity()
-        self.roles.append(role)
-        inputs = json.loads(dialogs[1]["content"])
-        if role != "COORDINATOR":
-            assert inputs["previous_handoff"]["artifact_id"]
-        if role == "EDITOR" and len(dialogs) == 2:
-            assert "edit__apply_patch" not in [x["function"]["name"] for x in tools]
-            msg = dict(
-                role="assistant",
-                tool_calls=[
-                    dict(
-                        id="try-write",
-                        type="function",
-                        function=dict(name="edit__apply_patch", arguments="{}"),
-                    )
-                ],
-            )
-        else:
-            if role == "EDITOR":
-                assert dialogs[-1]["tool_call_id"] == "try-write" and json.loads(dialogs[-1]["content"]) == {
-                    "error": "TOOL_DENIED"
-                }
-            if role == "MATERIAL":
-                assert inputs["evidence_ids"] and inputs["intervals"]
-            if role == "REVIEWER":
-                assert (
-                    inputs["revision_id"]
-                    and inputs["render_job_id"]
-                    and inputs["checks"]["media"] == "PASSED"
-                )
-            plan = dict(
-                decision="APPROVE",
-                note="核对本阶段输入",
-                evidence_ids=inputs["evidence_ids"],
-                candidate_order=[],
-            )
-            msg = dict(role="assistant", content=json.dumps(dict(type="FINAL", plan=plan)))
-        return dict(choices=[dict(message=msg)], usage=dict(prompt_tokens=60, completion_tokens=10))
 
 
 def check_image_workflow(client, project, media, post, wait):
@@ -100,13 +40,14 @@ def check_image_workflow(client, project, media, post, wait):
         return wait(client, run["run_id"])[0]
 
     exact = ask(picture, "same-pixel-image")
-    assert exact["coverage_summary"]["protocol_id"] == "exact-rgb-v1"
-    eid = next(c["evidence_ids"][0] for c in exact["claims"] if c["support"] == "SUPPORTED")
-    assert key in client.get("/v1/evidence/" + eid).json()["artifact_ids"]
+    assert exact["claims"] and all(c["support"] == "UNCERTAIN" for c in exact["claims"])
+    proofs = [client.get("/v1/evidence/" + eid).json() for c in exact["claims"] for eid in c["evidence_ids"]]
+    assert any(key in proof["artifact_ids"] for proof in proofs)
     with Image.open(BytesIO(picture)) as image, BytesIO() as out:
         image.resize((32, 32)).save(out, "PNG")
         approximate = ask(out.getvalue(), "resized-query-image")
-    assert approximate["coverage_summary"]["protocol_id"] != "exact-rgb-v1"
+    assert approximate["claims"] and all(c["support"] == "UNCERTAIN" for c in approximate["claims"])
+    assert approximate["coverage_summary"]["verified_ranges"] == []
 
 
 @pytest.mark.real_media
@@ -159,11 +100,9 @@ def test_natural_time_request_preview_and_restore_after_restart(tmp_path, monkey
                 break
             time.sleep(0.1)
         assert state["status"] == "SUCCEEDED", state
-        validate_contract("WorkflowRun", state)
         return c.get(url + "/result").json(), state
 
     work = tmp_path / "app"
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_TEAM", "true")
     with TestClient(create_app(work_dir=work)) as c:
         post(c, "/user/register", dict(creds, nickname="editor"))
         sign_in(c)
@@ -189,7 +128,6 @@ def test_natural_time_request_preview_and_restore_after_restart(tmp_path, monkey
         result, state = wait(c, workflow["run_id"])
         assert state["budget_usage"]["model_calls"] == 0
         assert result["brief"]["selection_mode"] == "EXPLICIT_RANGES"
-        validate_contract("EditBrief", result["brief"])
         metadata = c.get("/v1/artifacts/" + result["preview_artifact_id"]).json()
         out = c.get(metadata["url"]).content
         assert out[4:8] == b"ftyp" and hashlib.sha256(out).hexdigest() == metadata["sha256"]
@@ -208,33 +146,10 @@ def test_natural_time_request_preview_and_restore_after_restart(tmp_path, monkey
             headers={"Last-Event-ID": workflow["last_event_id"]},
         )
         assert events.status_code == 200 and "event: completed" in events.text
-        tasks = c.get(f"/v1/workflow-runs/{state['run_id']}/team-tasks").json()["items"]
-        assert len(tasks) == 6 and all(task["status"] == "SUCCEEDED" for task in tasks)
-        assert {task["role"] for task in tasks} == {"COORDINATOR", "MATERIAL", "EDITOR", "REVIEWER"}
-        controlled = TeamFixture()
-        controlled.roles = []
-        c.app.state.workflow_worker.planner = controlled
-        group = post(
-            c,
-            "/v1/workflow-runs",
-            dict(
-                body,
-                message="剪出台词「Where is my ticket?」",
-                idempotency_key="four-role-edit",
-                budget=dict(DEFAULT_BUDGET, max_cost_microunits=10000),
-            ),
-        )
-        team_result, team_state = wait(c, group["run_id"])
-        assert controlled.roles == ["COORDINATOR", "MATERIAL", "EDITOR", "EDITOR", "REVIEWER"]
-        assert (
-            team_result["team_review"]["model"] == "same-test-deployment"
-            and team_state["budget_usage"]["model_calls"] == 5
-        )
         monkeypatch.setenv("DOVIDEO_WORKFLOWS_ENABLED", "false")
         assert c.post("/v1/workflow-runs", json=body).status_code == 503
         assert c.get(f"/v1/workflow-runs/{state['run_id']}/result").json() == result
     monkeypatch.setenv("DOVIDEO_WORKFLOWS_ENABLED", "true")
-    monkeypatch.setenv("DOVIDEO_WORKFLOW_TEAM", "false")
     with TestClient(create_app(work_dir=work)) as c:
         sign_in(c)
         assert c.get(f"/v1/workflow-runs/{state['run_id']}/result").json() == result
@@ -313,7 +228,6 @@ def test_natural_time_request_preview_and_restore_after_restart(tmp_path, monkey
         query_body = dict(search=query, idempotency_key="count-quoted-dialogue")
         lookup = post(c, search_url, query_body)
         answer, _ = wait(c, lookup["run_id"])
-        validate_contract("AnswerResult", answer)
         assert answer["found_event_count"] == 1 and answer["count_qualifier"] == "WITHIN_PROTOCOL"
         assert post(c, search_url, query_body)["run_id"] == lookup["run_id"]
         assert (

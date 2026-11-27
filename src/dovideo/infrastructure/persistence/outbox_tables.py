@@ -1,4 +1,4 @@
-"""Shared event identifiers for render, workflow and team notification delivery."""
+"""Shared event identifiers for render, processing and workflow event delivery."""
 
 from sqlalchemy import BigInteger, Column, Integer, String, Table
 from .sqlalchemy import Base

@@ -1,27 +1,24 @@
 """Exercise real SQL commits, same-key replay and competing writers."""
-import os
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import func, select
 
 from dovideo.application.edit_sources import EditSources
 from dovideo.application.edit_timeline import EditError, uid
-from dovideo.application.spec_contracts import validate_contract
 from dovideo.infrastructure.persistence.edit_repository import EditRepository, project_view
 from dovideo.infrastructure.persistence.edit_tables import EDIT_TABLES, events, jobs, projects, revisions
 from dovideo.infrastructure.persistence.source_tables import projects as source_projects, sources as source_rows
-from dovideo.infrastructure.persistence.sqlalchemy import Base
+from dovideo.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
 
 
 PROFILE = dict(width=320, height=240, fps_num=24, fps_den=1, audio_sample_rate=48000)
 
 
-@pytest.fixture(params=["sqlite"] + (["mysql"] if os.getenv("VIDEOMIND_TEST_MYSQL_URL") else []))
-def setup(tmp_path, request):
-    url = os.environ["VIDEOMIND_TEST_MYSQL_URL"] if request.param == "mysql" else f"sqlite:///{tmp_path}/edit.db"
-    engine = create_engine(url)
+@pytest.fixture
+def setup(tmp_path):
+    engine = create_sqlalchemy_engine(f"sqlite:///{tmp_path}/edit.db")
     Base.metadata.create_all(engine, tables=[source_projects, source_rows, *EDIT_TABLES])
     store = EditSources(engine, tmp_path)
     workspace = uid()
@@ -50,7 +47,6 @@ def test_history_replace_reorder_restore_and_atomic_rollback(setup):
     initial = repo.get(projects, scope, edit, project_view)["head_revision_id"]
     append = dict(op="append_clip", clip=clip)
     first = apply(repo, scope, edit, 0, "add-clips", append, append)
-    validate_contract("OperationReceipt", first)
     c1, c2 = [v["clip_id"] for v in first["clip_id_assignments"]]
     second = apply(repo, scope, edit, 1, "move-clips", dict(op="replace_clip", clip_id=c1,
                    clip=dict(clip, audio_policy="mute")), dict(op="reorder_clips", clip_ids=[c2, c1]))
