@@ -1,5 +1,6 @@
 """One source version's frame, audio and text evidence; all input is local."""
 
+from bisect import bisect_left
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from hashlib import sha256
@@ -28,7 +29,7 @@ from cutsieve.application.media_memory import (
 from cutsieve.infrastructure.edit_captions import Cue, write_srt
 from cutsieve.infrastructure.persistence.processing_catalog import record
 from .source_artifacts import command, digest_file
-from .local_inference import asr_model_config
+from .local_inference import asr_model_config, ocr_model_config
 from cutsieve.infrastructure.persistence.media_visual_budget import billed_window
 from .visual_observations import (
     visual_deployment,
@@ -39,27 +40,58 @@ from .visual_observations import (
 
 US = 1_000_000
 CAPABILITIES = ("asr", "ocr", "visual_observation", "text_embedding", "image_embedding")
+OCR_PROVIDERS = frozenset(("paddleocr", "rapidocr-onnxruntime"))
+SUBTITLES_COVER_ASR = "内嵌字幕已覆盖"
+TEXT_INDEX_OPTIONAL = "默认由 FTS5 全文检索覆盖（未单独启用文本向量）"
 
 
 def local_models(env=None):
     """Only explicitly provisioned local weights may be loaded by this pipeline."""
     env = os.environ if env is None else env
     root, interpreter = asr_model_config(env)
-    return dict(python=env.get("CUTSIEVE_MEDIA_PYTHON") or sys.executable,
-                asr=root, asr_python=interpreter, ocr=env.get("CUTSIEVE_PADDLE_OCR_DIR") or "")
+    ocr, ocr_python = ocr_model_config(env)
+    return dict(python=ocr_python, asr=root, asr_python=interpreter, ocr=ocr)
 
 
-def asr_version(interpreter, stopped=None):
+def local_package_version(interpreter, package, module, stopped=None):
+    probe = f"import {module}; from importlib.metadata import version; print(version({package!r}))"
+    if package == "paddleocr":
+        probe = 'import os; os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"; import paddle; ' + probe
     try:
-        version, _ = command([
-            interpreter, "-I", "-c",
-            "import faster_whisper; from importlib.metadata import version; print(version('faster-whisper'))",
-        ], stopped, timeout=20)
+        version, _ = command([interpreter, "-I", "-c", probe], stopped, timeout=20)
     except InterruptedError:
         raise
     except (OSError, ValueError, TimeoutExpired):
         return None
     return version.decode().strip()
+
+
+def asr_version(interpreter, stopped=None):
+    return local_package_version(interpreter, "faster-whisper", "faster_whisper", stopped)
+
+
+def ocr_version(root, interpreter, stopped=None):
+    if root == "rapidocr":
+        return local_package_version(interpreter, "rapidocr-onnxruntime", "rapidocr_onnxruntime", stopped)
+    if root and all((Path(root) / model).is_dir() for model in ("PP-OCRv5_mobile_det", "PP-OCRv5_mobile_rec")):
+        return local_package_version(interpreter, "paddleocr", "paddleocr", stopped)
+    return None
+
+
+def select_ocr_frames(frames, *, has_subtitles, stride=1, max_with_subs=60):
+    frames = sorted(frames, key=lambda a: a.body["frame"]["actual_us"])[::stride]
+    if not has_subtitles or not max_with_subs or len(frames) <= max_with_subs:
+        return frames
+    times = [a.body["frame"]["actual_us"] for a in frames]
+    selected = {}
+    for i in range(max_with_subs):
+        fraction = i / (max_with_subs - 1) if max_with_subs > 1 else 0.5
+        target = times[0] + fraction * (times[-1] - times[0])
+        right = min(bisect_left(times, target), len(times) - 1)
+        left = max(0, right - 1)
+        nearest = min((left, right), key=lambda j: abs(times[j] - target))
+        selected[nearest] = frames[nearest]
+    return list(selected.values())
 
 
 class ProcessingUnits:
@@ -82,6 +114,7 @@ class ProcessingUnits:
         }
         for name in self.config["requested_capabilities"]:
             self.caps[name]["reason"] = "本机未配置对应的处理模型"
+        self.caps["text_embedding"].update(state="SKIPPED", reason=TEXT_INDEX_OPTIONAL)
         self.problems = []
         self.proxy = {}
         self.units = {r.unit: r.body for r in catalog.entries(run, "CHECKPOINT")}
@@ -405,38 +438,43 @@ class ProcessingUnits:
                     flags=["EMBEDDED_SUBTITLE"],
                 )
             )
-        self.save("subtitles", "SUBTITLES", items, {"complete": True})
+        self.save("subtitles", "SUBTITLES", items, {"complete": True, "has_text": bool(cues)})
+
+    def has_subtitle_text(self):
+        subtitles = self.units.get("subtitles", {})
+        if "has_text" in subtitles:
+            return subtitles["has_text"]
+        # Older checkpoints recorded successful extraction even when it produced no cues.
+        return bool(subtitles.get("complete")) and any(
+            entry.body["source"] == "embedded-subtitle" for entry in self.catalog.entries(self.run, "EVIDENCE")
+        )
 
     def local_batch(self, mode):
-        root = Path(self.models.get(mode) or "")
-        if not self.models.get(mode) or not root.is_dir():
+        root = self.models.get(mode)
+        if not root or (root != "rapidocr" and not Path(root).is_dir()):
             return None
         interpreter = (self.models.get("asr_python") if mode == "asr" else None) or self.models["python"] or sys.executable
-        package = "faster-whisper" if mode == "asr" else "paddleocr"
         if mode == "asr":
+            package = "faster-whisper"
             version = asr_version(interpreter, self.reader.stopped)
-            if not version:
-                return None
         else:
-            output, _ = command([interpreter, "-I", "-c",
-                                 "from importlib.metadata import version; print(version('paddleocr'))"],
-                                self.reader.stopped)
-            version = output.decode().strip()
+            package = "rapidocr-onnxruntime" if root == "rapidocr" else "paddleocr"
+            version = ocr_version(root, interpreter, self.reader.stopped)
+        if not version:
+            return None
+        model = root if root == "rapidocr" else str(Path(root).resolve())
         adapter = Path(__file__).with_name("local_inference.py")
-        model_stamp = sha256(f"{root.resolve()}:{package}:{version}".encode()).hexdigest()
+        model_stamp = sha256(f"{model}:{package}:{version}".encode()).hexdigest()
         # Cache against the source revision, input bytes and configured model installation.
         cache = self.folder / "cache"
         cache.mkdir(parents=True, exist_ok=True)
         if mode == "ocr":
-            batch = []
-            for a in self.catalog.entries(self.run, "ARTIFACT"):
-                if "frame" in a.body:
-                    batch.append(
-                        (
-                            self.catalog.derived_path(a.body["file"]),
-                            a,
-                        )
-                    )
+            frames = (a for a in self.catalog.entries(self.run, "ARTIFACT") if "frame" in a.body)
+            selected = select_ocr_frames(
+                frames, has_subtitles=self.has_subtitle_text(),
+                **self.config.get("_ocr_sampling", {}),
+            )
+            batch = [(self.catalog.derived_path(a.body["file"]), a) for a in selected]
         else:
             batch = []
             for i, (start, end) in enumerate(self.spans):
@@ -451,7 +489,7 @@ class ProcessingUnits:
             tasks.append(dict(path=str(path), output=str(cache / (key + ".json"))))
         spec = self.temp / (mode + ".json")
         spec.write_text(
-            json.dumps(dict(mode=mode, model=str(root.resolve()), checkpoint=model_stamp, inputs=tasks)),
+            json.dumps(dict(mode=mode, model=model, engine=package, checkpoint=model_stamp, inputs=tasks)),
             encoding="utf8",
         )
         command([interpreter, "-I", adapter, spec], self.reader.stopped, timeout=7200)
@@ -459,10 +497,14 @@ class ProcessingUnits:
 
     def recognize(self, mode):
         if mode in self.units:
-            self.caps[mode] = self.units[mode]
+            self.caps[mode] = {k: self.units[mode][k] for k in ("name", "state", "reason")}
             return
         if mode not in self.config["requested_capabilities"]:
             self.save(mode, mode.upper(), state=self.caps[mode])
+            return
+        if mode == "asr" and self.has_subtitle_text():
+            self.caps[mode].update(state="SKIPPED", reason=SUBTITLES_COVER_ASR)
+            self.save(mode, "ASR", state=self.caps[mode])
             return
         if mode == "asr" and self.source.probe["audio_index"] is None:
             self.caps[mode] = dict(name=mode, state="AVAILABLE", reason="原片没有音轨")
@@ -482,7 +524,7 @@ class ProcessingUnits:
             items = [report]
             if mode == "ocr":
                 frame = info.body["frame"]
-                ocr_frames.append((frame["actual_us"], raw["lines"], info, report, raw["version"]))
+                ocr_frames.append((frame["actual_us"], raw["lines"], info, report, raw))
             else:
                 _, core_start, core_end, left = info
                 audio = self.keep_file(path, "TRANSCRIPT", "audio/wav", prefix + ":wav")
@@ -540,8 +582,8 @@ class ProcessingUnits:
                 items = self.evidence(
                     f"ocr-occurrence:{i}",
                     "OCR",
-                    "paddleocr",
-                    anchor[4],
+                    anchor[4]["model"],
+                    anchor[4]["version"],
                     group["text"],
                     group["start_us"],
                     min(group["end_us"] + 1, self.source.probe["duration_us"]),
@@ -556,7 +598,10 @@ class ProcessingUnits:
                 self.catalog.commit(self.run, [roi, *items])
         reason = "本次 VAD/转写未提取到台词" if mode == "asr" and not spoken else None
         self.caps[mode] = dict(name=mode, state="AVAILABLE", reason=reason)
-        self.save(mode, mode.upper(), state=self.caps[mode])
+        state = dict(self.caps[mode])
+        if mode == "ocr":
+            state["frame_artifact_ids"] = [info.id for _, info, _ in batch]
+        self.save(mode, mode.upper(), state=state)
 
     def visual_report(self, deployment, unit, window, inputs):
         # Frame identifiers change between generations. The actual input pixels and times do not.
@@ -727,13 +772,13 @@ class ProcessingUnits:
         self.frames()
         try:
             self.subtitles()
-        except ValueError:
+        except (ValueError, TimeoutExpired):
             self.problems.append("原片字幕轨无法转换为文本")
             self.save("subtitles", "SUBTITLES", state={"complete": False})
         for mode in ("asr", "ocr"):
             try:
                 self.recognize(mode)
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, TimeoutExpired) as exc:
                 if isinstance(exc, InterruptedError):
                     raise
                 self.caps[mode] = dict(name=mode, state="FAILED", reason=f"本地 {mode.upper()} 推理未完成")
@@ -771,10 +816,13 @@ class ProcessingUnits:
                 ("vision", "image_embedding"),
             ):
                 if space in spaces:
-                    self.caps[name] = dict(name=name, state="AVAILABLE", reason=None)
+                    self.caps[name] = dict(
+                        name=name, state="AVAILABLE", reason=None,
+                        storage=getattr(self.catalog, "search_vector_storage", None),
+                    )
         self.modality_coverage(rows)
         for name in self.config["requested_capabilities"]:
-            if self.caps[name]["state"] != "AVAILABLE":
+            if self.caps[name]["state"] not in {"AVAILABLE", "SKIPPED"}:
                 self.problems.append(name + "：" + self.caps[name]["reason"])
         self.catalog.publish(
             self.run,
@@ -788,28 +836,28 @@ class ProcessingUnits:
         """Each protocol keeps its own coverage; frame decoding can't verify an OCR/ASR claim."""
         routed = {"asr": "ASR", "ocr": "OCR", "image_embedding": "IMAGE_EMBEDDING"}
         for name, modality in routed.items():
+            state = self.caps[name]
+            if state["state"] == "SKIPPED":
+                continue
             if (
                 name not in self.config["requested_capabilities"]
-                and self.caps[name]["state"] != "AVAILABLE"
+                and state["state"] != "AVAILABLE"
             ):
                 continue
-            relevant = [
-                r
-                for r in rows
-                if r["source"]
-                == {
-                    "asr": "faster-whisper",
-                    "ocr": "paddleocr",
-                    "image_embedding": "sampled-frame",
-                }[name]
-            ]
+            providers = {
+                "asr": {"faster-whisper"},
+                "ocr": OCR_PROVIDERS,
+                "image_embedding": {"sampled-frame"},
+            }[name]
+            relevant = [r for r in rows if r["source"] in providers]
+            scanned = self.units.get("ocr", {}).get("frame_artifact_ids") if name == "ocr" else None
+            scanned = set(scanned) if scanned is not None else None
             for i, span in enumerate(self.spans):
                 found = [
                     r
                     for r in relevant
                     if r["range"]["start_us"] < span[1] and r["range"]["end_us"] > span[0]
                 ]
-                state = self.caps[name]
                 ok = state["state"] == "AVAILABLE"
                 stage = "MODEL_OBSERVED" if ok else "FAILED"
                 if ok and name == "asr" and self.source.probe["audio_index"] is None:
@@ -820,7 +868,11 @@ class ProcessingUnits:
                     else []
                 )
                 reason = state["reason"] if not ok else None
-                if name != "asr" and not frame_data:
+                if scanned is not None and frame_data:
+                    frame_data = [frame for frame in frame_data if frame["artifact_id"] in scanned]
+                    if not frame_data:
+                        stage = "PLANNED"
+                elif name != "asr" and not frame_data:
                     stage, reason = "FAILED", "此窗口没有可用的实际采样帧"
                 c = coverage(
                     self.run,

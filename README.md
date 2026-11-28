@@ -2,7 +2,7 @@
 
 **本地优先的长视频多模态查证与可控粗剪 Agent 工作台。**
 
-CutSieve 面向 **30 分钟以上的长原片**（电影拉片、纪录片粗剪、用户访谈/可用性测试录屏、实验/游戏复盘）：原片全程留在本地，入库自动构建镜头边界代表帧、持久化中英文全文索引（SQLite FTS5）与离线语音转写（Faster-Whisper）；通过单循环原生工具调用 **Agent Harness**，低成本完成跨时段证据检索、视觉抽帧核实、版本化时间线粗剪与 FFmpeg 验收导出，并把每一步工具调用、帧卸载、上下文压缩与耗时完整呈现为可审计的 **Harness Trace**。
+CutSieve 面向 **30 分钟以上的长原片**（电影拉片、纪录片粗剪、访谈与录屏复盘）。原片留在本机，推荐的入库配置用 SQLite FTS5 检索台词和画面文字，用 Chinese-CLIP 检索静默画面。**Agent Harness** 实现跨时段证据检索、原帧核实、版本化粗剪与 FFmpeg 验收导出，并在 **Harness Trace** 中记录工具调用、帧卸载、上下文压缩与耗时。
 
 ![CutSieve 单屏三栏工作台：27 分钟电影粗剪 V3 淡入淡出成片回放](docs/images/01-studio-rough-cut.png)
 
@@ -29,6 +29,14 @@ CutSieve 面向 **30 分钟以上的长原片**（电影拉片、纪录片粗剪
 
 ---
 
+## 本地感知服务状态
+
+「系统状态」抽屉显示对话模型配置、后台队列，以及本机 ASR、OCR、Chinese-CLIP 向量检索与 FFmpeg 的就绪状态。
+
+![系统状态抽屉显示本机 ASR、OCR、Chinese-CLIP 和 FFmpeg 均已就绪](docs/images/05-system-capabilities.png)
+
+---
+
 ## Agent Harness 核心设计
 
 CutSieve 不把长视频硬塞进大模型上下文，也不做脆弱的固定脚本流水线，而是围绕可控、可审计、低成本构建了完整的 **Agent Harness**：
@@ -44,7 +52,20 @@ CutSieve 不把长视频硬塞进大模型上下文，也不做脆弱的固定�
 - **本地长视频感知底座**：
   - **160px FFmpeg 镜头边界自适应采样**：替代固定 60 秒截断窗口，短镜取中点避开转场模糊帧、长镜保底采样 + 8×8 RGB 静止去重。
   - **持久化 SQLite FTS5 全文索引**：支持中文二元分词 + 英文词法检索（零 Alembic 迁移漂移），离线评测平均检索延迟 **6.2 ms**。
-  - **本地离线 Faster-Whisper ASR**：配置模型目录后，对无内嵌字幕视频自动运行 int8 CPU 转写并写入 FTS5 与观影笔记，原片不出本机。
+  - **本地多模态入库**：优先使用内嵌字幕，并用 Faster-Whisper 补齐无字幕语音、用 RapidOCR 读取画面文字、用 Chinese-CLIP 为代表帧建立跨模态索引。
+
+---
+
+## 为什么默认用 FTS5 + ASR + OCR + Chinese-CLIP，而不默认常驻 BGE-M3 文字向量？
+
+| 要查找的证据 | 默认本地路径 | 工程依据 |
+| --- | --- | --- |
+| 台词、转写和观影笔记中的线索 | **SQLite FTS5 + Agentic Search** | 单片通常只有 **100–2,000 行**台词或文本片段。Agent 根据观影笔记和检索结果改写关键词、补同义词，FTS5 执行中英文词法召回，离线评测平均 **6.2 ms**。 |
+| 无字幕的语音 | **`faster-whisper`，int8 CPU** | 在 `.venv` 内离线转写带时间戳的语音片段，随后进入 FTS5 和观影笔记。 |
+| 幻灯片、硬字幕和界面报错 | **RapidOCR，ONNX PP-OCRv4** | `rapidocr-onnxruntime` 在 `.venv` 内读取采样帧文字，为 FTS5 提供音轨和软字幕之外的证据。 |
+| 完全静默的场景 | **512 维 Chinese-CLIP + 嵌入式 Qdrant** | 自然语言可以直接检索代表帧。`qdrant-client` 在进程内读写索引，单片样例约 **471 KB**，无需 Docker。 |
+
+CPU 常驻 BGE-M3 需要约 **2.27 GB** 的权重和约 **3 GB** 的内存。推荐配置把这部分容量留给语音、画面文字和视觉召回。数百小时以上的片库可按需启用独立的 BGE-M3 文本空间。
 
 ---
 
@@ -54,10 +75,11 @@ CutSieve 不把长视频硬塞进大模型上下文，也不做脆弱的固定�
 Vue 3 单屏暗房工作台（监视器 / 版本化时间线 / 对话助手 / 运行轨迹抽屉）
                             │ HTTP + SSE
                             ▼
-FastAPI 单进程引擎（本地 SQLite WAL + FTS5 + 本地磁盘 + 可选 Qdrant）
+FastAPI 单进程引擎（SQLite WAL + FTS5 + 本地磁盘 + 嵌入式 Qdrant）
   ├─ 长片入库流水线：分片续传 → FFprobe PTS 校准 → 160px 镜头检测与静止去重抽帧
-  │                  → 内嵌字幕 / 本地 Faster-Whisper ASR / 可选 OCR → FTS5 & 观影笔记
-  ├─ 多路混合检索：SQLite FTS5 + 8×8 空间色彩/图像特征 + 可选 Qdrant 向量（RRF 融合）
+  │                  → 内嵌字幕 / Faster-Whisper ASR / RapidOCR → FTS5 & 观影笔记
+  │                  → Chinese-CLIP 代表帧编码 → 嵌入式 Qdrant
+  ├─ 多路混合检索：SQLite FTS5 + 8×8 空间色彩/图像特征 + Chinese-CLIP 视觉召回（RRF 融合）
   └─ Native Tool-Use Agent Harness（默认 deepseek-v4-flash）
         ├─ 8 个正交工具 + Contact Sheet 拼图抽帧 + 自引导错误回执
         ├─ 上下文工程：历史视觉帧自动卸载 + 原子历史压缩 + 步数/图片上限
@@ -95,7 +117,7 @@ FastAPI 单进程引擎（本地 SQLite WAL + FTS5 + 本地磁盘 + 可选 Qdran
 
 ---
 
-## 1 分钟本地启动
+## 本地启动
 
 前置依赖：**Python 3.12+**、**Node.js 22.12+**、PATH 中的 **FFmpeg / ffprobe**（或通过 `.env` 的 `CUTSIEVE_FFMPEG_DIR` 指定）。
 
@@ -111,7 +133,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn cutsieve.presentation.api.app:create_app --factory --host 127.0.0.1 --port 8173 --workers 1
 ```
 
-> **启用无字幕视频本地语音转写（可选）**：在 `.venv` 中安装 `faster-whisper`，并在 `.env` 中设置 `CUTSIEVE_WHISPER_DIR=<本地模型目录>`（如 `faster-whisper-tiny`），即可离线转写无字幕视频。
+上述命令即可使用内置 FTS5。推荐按 [本地快速开始](docs/QUICK_START.md#2-配置本地感知) 配置 Faster-Whisper、RapidOCR 和仅启用 `vision` 空间的 Chinese-CLIP，再启动后端。
 
 ### 2. 启动前端
 
@@ -122,14 +144,14 @@ $env:CUTSIEVE_DEV_PROXY_TARGET = 'http://127.0.0.1:8173'
 npm run dev -- --host 127.0.0.1 --port 5175
 ```
 
-浏览器打开 `http://127.0.0.1:5175/` 即可进入工作台。详细配置与可选 Qdrant 向量服务见 [本地快速开始](docs/QUICK_START.md)。
+浏览器打开 `http://127.0.0.1:5175/` 即可进入工作台，点击「系统状态」确认本地服务就绪。
 
 ---
 
 ## 测试与自动化评测
 
 ```powershell
-# 后端全量测试（当前 128 passed）与 Alembic 零漂移校验
+# 后端全量测试与 Alembic 零漂移校验
 .\.venv\Scripts\python.exe -m pytest -q
 $env:CUTSIEVE_DATABASE_URL = "sqlite:///work/verify-$([guid]::NewGuid()).db"
 .\.venv\Scripts\python.exe -m alembic upgrade head
@@ -139,7 +161,7 @@ $env:CUTSIEVE_DATABASE_URL = "sqlite:///work/verify-$([guid]::NewGuid()).db"
 .\.venv\Scripts\python.exe scripts/eval_harness.py --mode offline
 .\.venv\Scripts\python.exe scripts/eval_harness.py --mode live --video work/samples/blender_cinema_27m.mp4
 
-# 前端单测 + 组件测试（当前 35 passed）与生产构建
+# 前端单测、组件测试与生产构建
 cd client
 npm test
 npm run build

@@ -1,4 +1,4 @@
-"""Serve local, read-only Qwen VL embedding and BGE-M3 checkpoints on loopback."""
+"""Serve local, read-only Qwen VL, CLIP, SigLIP, and BGE-M3 checkpoints on loopback."""
 
 import argparse
 import base64
@@ -29,54 +29,116 @@ def fingerprint(folder):
 
 
 class Encoders:
-    def __init__(self, vision, text, *, joint_text=False):
+    def __init__(self, vision, text, *, joint_text=False, device="auto"):
         import torch
 
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device == "cuda" and not torch.cuda.is_available():
+            raise ValueError("CUDA 不可用")
+        self.device, self.torch = device, torch
         self.spaces = {}
         self.joint_text = joint_text
         if vision:
             folder = Path(vision).resolve(strict=True)
             helper = folder / "scripts/qwen3_vl_embedding.py"
-            spec = importlib.util.spec_from_file_location("local_qwen_embedding", helper)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-            class Encoder(module.Qwen3VLEmbedder):
-                def _preprocess_inputs(self, conversations):
-                    batch = super()._preprocess_inputs(conversations)
-                    expects_image = any(
-                        item["type"] == "image"
-                        for chat in conversations
-                        for message in chat
-                        for item in message["content"]
-                    )
-                    if expects_image and "pixel_values" not in batch:
-                        raise ValueError("图像解码失败")
-                    return batch
-
-            self.vision = Encoder(str(folder), dtype="auto", max_pixels=384 * 384)
-            self.spaces["vision"] = dict(version="Qwen3-VL-Embedding-" + fingerprint(folder), dimensions=2048)
+            if helper.is_file():
+                dimensions = self.load_qwen(folder, helper)
+                name = "Qwen3-VL-Embedding"
+            else:
+                dimensions = self.load_clip(folder)
+                name = folder.name
+            self.spaces["vision"] = dict(version=f"{name}-{fingerprint(folder)}", dimensions=dimensions)
             if joint_text:
                 self.spaces["text"] = dict(
-                    version=self.spaces["vision"]["version"] + "-text", dimensions=2048
+                    version=self.spaces["vision"]["version"] + "-text", dimensions=dimensions
                 )
         if text:
             from transformers import AutoModel, AutoTokenizer
 
             folder = Path(text).resolve(strict=True)
-            self.bge = AutoModel.from_pretrained(folder, local_files_only=True).eval()
+            self.bge = AutoModel.from_pretrained(folder, local_files_only=True).to(device).eval()
             self.tokenizer = AutoTokenizer.from_pretrained(folder, local_files_only=True)
             self.spaces["text"] = dict(
                 version=folder.name + "-" + fingerprint(folder), dimensions=self.bge.config.hidden_size
             )
-        self.torch = torch
+
+    def load_qwen(self, folder, helper):
+        spec = importlib.util.spec_from_file_location("local_qwen_embedding", helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        class Encoder(module.Qwen3VLEmbedder):
+            def _preprocess_inputs(self, conversations):
+                batch = super()._preprocess_inputs(conversations)
+                expects_image = any(
+                    item["type"] == "image"
+                    for chat in conversations
+                    for message in chat
+                    for item in message["content"]
+                )
+                if expects_image and "pixel_values" not in batch:
+                    raise ValueError("图像解码失败")
+                return batch
+
+        model = Encoder(str(folder), dtype="auto", max_pixels=384 * 384, local_files_only=True)
+        model.model.to(self.device)
+        self.encode_vision = model.process
+        return model.model.config.text_config.hidden_size
+
+    def load_clip(self, folder):
+        model_type = json.loads((folder / "config.json").read_text(encoding="utf-8"))["model_type"]
+        if model_type == "chinese_clip":
+            from transformers import ChineseCLIPModel as Model, ChineseCLIPProcessor as Processor
+        elif model_type in {"clip", "siglip"}:
+            from transformers import AutoModel as Model, AutoProcessor as Processor
+        else:
+            raise ValueError(f"不支持的图像编码模型: {model_type}")
+        self.clip = Model.from_pretrained(folder, local_files_only=True).to(self.device).eval()
+        if model_type == "chinese_clip":
+            # Some Transformers 4.x releases read pooler_output in get_text_features
+            # even though Chinese-CLIP disables its pooler. Use the checkpoint's CLS state.
+            def pool_cls(_model, _args, output):
+                if output.pooler_output is None:
+                    output.pooler_output = output.last_hidden_state[:, 0, :]
+
+            self.clip.text_model.register_forward_hook(pool_cls)
+        self.processor = Processor.from_pretrained(folder, local_files_only=True)
+        self.encode_vision = self.clip_features
+        config = self.clip.config
+        self.clip_text_options = dict(
+            padding="max_length" if model_type == "siglip" else True,
+            truncation=True,
+            max_length=config.text_config.max_position_embeddings,
+        )
+        return config.vision_config.hidden_size if model_type == "siglip" else config.projection_dim
+
+    def clip_features(self, samples):
+        vectors = [None] * len(samples)
+        for key, input_name, get_features, options in (
+            ("image", "images", self.clip.get_image_features, {}),
+            ("text", "text", self.clip.get_text_features, self.clip_text_options),
+        ):
+            indices = [i for i, sample in enumerate(samples) if key in sample]
+            if not indices:
+                continue
+            inputs = self.processor(
+                **{input_name: [samples[i][key] for i in indices]}, **options, return_tensors="pt"
+            ).to(self.device)
+            output = get_features(**inputs)
+            # Transformers releases return either the feature tensor or a model output.
+            features = getattr(output, "pooler_output", output)
+            features = self.torch.nn.functional.normalize(features.float(), dim=-1)
+            for index, vector in zip(indices, features, strict=True):
+                vectors[index] = vector
+        return self.torch.stack(vectors)
 
     def encode(self, payload):
         from PIL import Image
 
         space = payload["space"]
         model = self.spaces[space]
-        if payload["version"] != model["version"] or not 1 <= len(payload["items"]) <= 4:
+        if payload["version"] != model["version"] or not 1 <= len(payload["items"]) <= 16:
             raise ValueError("空间或批次错误")
         items = payload["items"]
         with self.torch.inference_mode():
@@ -87,7 +149,7 @@ class Encoders:
                     truncation=True,
                     max_length=512,
                     return_tensors="pt",
-                )
+                ).to(self.device)
                 vectors = self.torch.nn.functional.normalize(self.bge(**args).last_hidden_state[:, 0], dim=1)
             else:
                 samples = []
@@ -99,18 +161,21 @@ class Encoders:
                             samples.append({"image": image.convert("RGB")})
                     else:
                         samples.append({"text": item["text"]})
-                vectors = self.vision.process(samples)
+                vectors = self.encode_vision(samples)
+        if tuple(vectors.shape) != (len(items), model["dimensions"]):
+            raise ValueError("编码维度有误")
         return dict(version=model["version"], vectors=vectors.float().tolist())
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--vision", help="Local Qwen3-VL-Embedding-2B model folder")
+    parser.add_argument("--vision", help="Local Qwen3-VL, Chinese-CLIP, CLIP, or SigLIP model folder")
     parser.add_argument("--text", help="Local BGE-M3 model folder")
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument(
         "--joint-text",
         action="store_true",
-        help="Explicitly use the supplied Qwen embedding checkpoint for text",
+        help="Use the supplied cross-modal checkpoint for the dedicated text space",
     )
     parser.add_argument("--port", type=int, default=8174)
     args = parser.parse_args()
@@ -120,7 +185,10 @@ def main():
         parser.error(
             "--joint-text requires a vision checkpoint and a dedicated text checkpoint must be omitted"
         )
-    encoders = Encoders(args.vision, args.text, joint_text=args.joint_text)
+    if args.device == "cpu":
+        # The Qwen checkpoint helper also chooses a device when it loads the model.
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    encoders = Encoders(args.vision, args.text, joint_text=args.joint_text, device=args.device)
 
     class Handler(BaseHTTPRequestHandler):
         def reply(self, status, body):
@@ -138,7 +206,7 @@ def main():
             if self.path != "/encode":
                 return self.send_error(404)
             size = int(self.headers.get("Content-Length", 0))
-            if not 0 < size <= 4 * 1024**2:
+            if not 0 < size <= 12 * 1024**2:
                 return self.send_error(413)
             try:
                 result = encoders.encode(json.loads(self.rfile.read(size)))

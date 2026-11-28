@@ -676,6 +676,17 @@ test('readiness drawer shows unavailable workers and the latest run telemetry, t
   let database = false
   const fetch = server(path => {
     if (path.endsWith('/p/workflow-runs')) return json(page([earlier, newest]))
+    if (path === '/v1/capabilities') return json({
+      general_model: 'local-vlm',
+      resolved_model_version: 'local-vlm-2026',
+      text: true, native_tools: true, vision: false,
+      dedicated_services: [
+        { name: 'ASR', configured: false, ready: false },
+        { name: 'OCR', configured: true, ready: true, version: database ? '1.4.5' : '1.4.4' },
+        { name: 'embedding', configured: true, ready: true, versions: { vision: 'chinese-clip' } },
+        { name: 'FFmpeg', configured: true, ready: database, version: database ? '8.0' : null },
+      ],
+    })
     if (path === '/v1/readiness') {
       return json(database ? { ready: false, dependency: 'database' } : { ready: false,
         queues: { render: { online: false, counts: { QUEUED: 2 }, failed: 3 }, workflow: { online: true, counts: {}, failed: 0 } },
@@ -684,12 +695,19 @@ test('readiness drawer shows unavailable workers and the latest run telemetry, t
   })
   const wrapper = render()
   await flushPromises()
-  expect(fetch.mock.calls.some(([url]) => url === '/v1/readiness')).toBe(false)
+  expect(fetch.mock.calls.some(([url]) => ['/v1/readiness', '/v1/capabilities'].includes(url))).toBe(false)
   await click(wrapper, '系统状态')
   await flushPromises()
   const panel = wrapper.get('dialog[open]')
   expect(panel.text()).toContain('视频渲染离线')
   expect(panel.text()).toContain('排队 2')
+  expect(panel.text()).toContain('模型与本地能力')
+  const details = panel.get('.capability-details')
+  expect(details.text()).toContain('对话模型已配置local-vlmlocal-vlm-2026支持工具视觉未启用')
+  expect(details.text()).toContain('ASR 语音转写未配置')
+  expect(details.text()).toContain('OCR 画面文字已就绪1.4.4')
+  expect(details.text()).toContain('向量检索已就绪图像 chinese-clip')
+  expect(details.get('[data-tone="partial"]').text()).toBe('不可用')
   expect(panel.text()).toContain('最近一轮用量')
   expect(panel.get('.usage-metrics').text()).toContain('1,024 / 128')
   expect(panel.get('.usage-metrics').text()).toContain('¥0.048')
@@ -697,8 +715,52 @@ test('readiness drawer shows unavailable workers and the latest run telemetry, t
   await click(panel, '更新服务状态')
   await flushPromises()
   expect(panel.text()).toContain('数据库暂时不可用')
+  expect(details.text()).toContain('1.4.5')
+  expect(details.text()).toContain('FFmpeg已就绪8.0')
   await click(panel, '关闭')
   expect(wrapper.find('dialog[open]').exists()).toBe(false)
+})
+
+test('the processing drawer distinguishes the built-in index from Qdrant projections', async () => {
+  let published = false
+  let asr = { name: 'asr', state: 'SKIPPED', reason: '内嵌字幕已覆盖' }
+  server(path => {
+    if (path.endsWith('/assets/a')) return json({
+      ...asset, capabilities: published ? [
+        { name: 'text_embedding', state: 'SKIPPED', reason: '默认由 FTS5 全文检索覆盖（未单独启用文本向量）' },
+        { name: 'visual_observation', state: 'UNCONFIGURED' },
+        { name: 'image_embedding', state: 'AVAILABLE', storage: 'qdrant' },
+        asr,
+        { name: 'ocr', state: 'AVAILABLE' },
+      ] : [],
+    })
+    if (path.endsWith('/a/processing-runs')) return json(page(
+      published ? [{ processing_run_id: 'processing', status: 'PARTIAL', stage: 'PUBLISHED' }] : [],
+    ))
+    if (path.endsWith('/a/coverage') || path.endsWith('/a/observations')) return json(page())
+  })
+  const wrapper = render()
+  await flushPromises()
+  await click(wrapper, '素材与笔记')
+  await flushPromises()
+  const panel = wrapper.get('dialog[open]')
+  expect(panel.get('.cap-list').text()).toContain('全文检索 (FTS5) · 待建库')
+  published = true
+  await click(panel, '刷新进度')
+  await flushPromises()
+  const stages = panel.findAll('.cap-list li')
+  expect(stages.map(stage => [stage.text(), stage.attributes('data-tone')])).toEqual([
+    ['全文检索 (FTS5) · 已就绪', 'ready'],
+    ['语音转写 · 内嵌字幕已覆盖', undefined],
+    ['画面文字 · 可用', 'ready'],
+    ['图像向量 (Qdrant) · 已就绪', 'ready'],
+    ['画面观察 · 未配置', undefined],
+  ])
+  expect(panel.get('.cap-optional-note').text()).toBe('语义向量 (Qdrant) · 可选（文字默认走 FTS5）')
+  asr = { name: 'asr', state: 'AVAILABLE' }
+  await click(panel, '刷新进度')
+  await flushPromises()
+  expect(panel.get('.cap-list').text()).toContain('语音转写 · 已完成')
 })
 
 test('the notes drawer shows capability and observation details and sends timestamps to the monitor', async () => {
@@ -719,7 +781,7 @@ test('the notes drawer shows capability and observation details and sends timest
   await click(wrapper, '素材与笔记')
   await flushPromises()
   const panel = wrapper.get('dialog[open]')
-  expect(panel.get('.cap-list').text()).toContain('语音转写 · 可用')
+  expect(panel.get('.cap-list').text()).toContain('语音转写 · 已完成')
   expect(panel.text()).toContain('站台广播')
   await click(panel, '打开观影笔记')
   await flushPromises()

@@ -459,7 +459,7 @@ onUnmounted(() => {
           @select-run="traceSelection = $event"
           @refresh="refreshTrace"
         />
-        <SystemStatus v-else :latest-run="latestRun" />
+        <SystemStatus v-else-if="drawer === 'status'" :latest-run="latestRun" />
       </div>
     </dialog>
   </div>

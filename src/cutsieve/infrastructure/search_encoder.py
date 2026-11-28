@@ -7,6 +7,7 @@ import hashlib
 from http.client import HTTPException as HTTPTransportError
 from io import BytesIO
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -29,7 +30,12 @@ def local_encoder(root):
         raise ValueError("本地编码器应使用回环 HTTP 地址")
     qdrant_url = os.getenv("CUTSIEVE_SEARCH_QDRANT_URL")
     qdrant_path = os.getenv("CUTSIEVE_SEARCH_QDRANT_PATH")
-    index = EvidenceIndex(url=qdrant_url, path=qdrant_path) if qdrant_url or qdrant_path else None
+    index = None
+    if qdrant_url or qdrant_path:
+        try:
+            index = EvidenceIndex(url=qdrant_url, path=qdrant_path)
+        except ImportError:
+            logging.getLogger(__name__).warning("Embedded Qdrant unavailable; using local vector caching")
     return SearchEncoder(url.rstrip("/"), root / "embeddings", index=index)
 
 
@@ -48,14 +54,30 @@ class SearchEncoder:
         self.index = index
         self.http = build_opener(ProxyHandler({}))
 
-    def call(self, path, body=None):
+    def call(self, path, body=None, *, timeout=25):
         data = None if body is None else json.dumps(body).encode()
         req = Request(self.url + path, data=data, headers={"Content-Type": "application/json"})
         try:
-            with self.http.open(req, timeout=25) as response:
+            with self.http.open(req, timeout=timeout) as response:
                 return json.load(response)
         except HTTPTransportError as exc:
             raise OSError("本地编码器的 HTTP 响应不完整") from exc
+
+    def spaces(self, **request_options):
+        advertised = self.call("/spaces", **request_options)
+        if not isinstance(advertised, dict):
+            raise ValueError("编码空间清单无效")
+        spaces = {}
+        for name, model in advertised.items():
+            if name not in {"text", "vision"}:
+                continue
+            if not isinstance(model, dict):
+                raise ValueError("编码空间描述无效")
+            version, dimensions = model.get("version"), model.get("dimensions")
+            if not isinstance(version, str) or not version.strip() or type(dimensions) is not int or dimensions < 1:
+                raise ValueError("编码空间版本或维度无效")
+            spaces[name] = model
+        return spaces
 
     def vector_path(self, workspace, model, key):
         digest = hashlib.sha256((model["version"] + "|" + key).encode()).hexdigest()
@@ -85,7 +107,7 @@ class SearchEncoder:
         return vectors
 
     def prepare(self, workspace, rows, *, publication=nullcontext):
-        spaces = self.call("/spaces")
+        spaces = self.spaces()
         prepared = {}
         for space, model in spaces.items():
             pending = {}
@@ -158,11 +180,12 @@ class SearchEncoder:
                     manifests[component] = row.get("search_spaces") or (
                         json.loads(path.read_text(encoding="utf8")) if path.exists() else {}
                     )
-            for space, model in self.call("/spaces").items():
-                query = image_input(image) if space == "vision" and image is not None else {"text": text}
-                if space == "text" and not text:
-                    continue
-                if not rows:
+            for space, model in self.spaces().items():
+                if space == "vision" and image is not None:
+                    query = image_input(image)
+                elif text:
+                    query = {"text": text}
+                else:
                     continue
                 eligible = [(i, r) for i, r in enumerate(rows) if self.feature(r, space)[0]]
                 pinned = [

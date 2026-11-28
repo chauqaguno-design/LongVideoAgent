@@ -24,6 +24,13 @@ from .source_tables import sources
 log = logging.getLogger(__name__)
 
 
+def ocr_sampling_setting(name, default, minimum):
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
 class ProcessingWorker:
     def __init__(self, sources_store):
         self.catalog = MediaCatalog(sources_store)
@@ -39,6 +46,10 @@ class ProcessingWorker:
             body,
             pipeline_version=version,
             _local=local_models(),
+            _ocr_sampling=dict(
+                stride=ocr_sampling_setting("CUTSIEVE_OCR_STRIDE", 1, 1),
+                max_with_subs=ocr_sampling_setting("CUTSIEVE_OCR_MAX_FRAMES_WITH_SUBS", 60, 0),
+            ),
             _frame_budget=max(1, min(65536, int(os.getenv("CUTSIEVE_MAX_MEDIA_FRAMES", "2048")))),
         )
 

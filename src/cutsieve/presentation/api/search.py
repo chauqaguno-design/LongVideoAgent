@@ -25,6 +25,8 @@ def install_search_routes(app, workspace_user):
         sources, app.state.processing.catalog, local_encoder(sources.root)
     )
     app.state.processing.catalog.prepare_search_rows = search.prepare_rows
+    if search.encoder:
+        app.state.processing.catalog.search_vector_storage = "qdrant" if search.encoder.index else "local"
     router = APIRouter(prefix="/v1")
 
     def workspace(user=Depends(workspace_user)):

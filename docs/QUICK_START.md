@@ -25,15 +25,38 @@ CUTSIEVE_MODEL_NATIVE_TOOLS=1
 
 ---
 
-## 2. 启动后端与前端
+## 2. 配置本地感知
 
-在仓库根目录启动后端（单进程内置处理、工作流、渲染与事件投递循环）：
+在仓库根目录创建 `.venv` 并安装后端、本地感知和嵌入式 Qdrant 的依赖。FTS5 随 SQLite 使用。
 
 ```powershell
 py -3.12 -m venv .venv
-& .\.venv\Scripts\python.exe -m pip install -c constraints-py312.txt -e ".[test]"
+& .\.venv\Scripts\python.exe -m pip install -c constraints-py312.txt -e ".[test,search-index]" faster-whisper rapidocr-onnxruntime
+```
+
+将 `Systran/faster-whisper-tiny`（约 75 MB）和 `OFA-Sys/chinese-clip-vit-base-patch16` 的模型文件分别放入 `work/models/faster-whisper-tiny` 与 `work/models/chinese-clip-vit-base-patch16`。RapidOCR 使用软件包自带的 PP-OCRv4 ONNX 权重。
+
+另开一个 PowerShell，在仓库根目录用装有 PyTorch、Transformers 和 Pillow 的 Python 环境启动本地编码器。若复用 `.venv`，可在该虚拟环境额外安装 `torch` 和 `transformers`，并用 `.venv\Scripts\python.exe` 运行同一脚本。
+
+```powershell
+python scripts/serve_search_encoder.py --vision work/models/chinese-clip-vit-base-patch16 --port 18176
+```
+
+`GET http://127.0.0.1:18176/spaces` 应返回唯一的 `vision` 空间，`dimensions` 为 `512`。向量索引使用 `qdrant-client` 直接写入本地目录，无需 Docker。
+
+## 3. 启动后端与前端
+
+回到后端 PowerShell，在仓库根目录设置本地感知变量并启动单进程服务。也可将这些变量保存到自己的 `.env` 供后续启动复用。
+
+```powershell
+$env:CUTSIEVE_WHISPER_DIR = 'work/models/faster-whisper-tiny'
+$env:CUTSIEVE_OCR_ENGINE = 'rapidocr'
+$env:CUTSIEVE_SEARCH_ENCODER_URL = 'http://127.0.0.1:18176'
+$env:CUTSIEVE_SEARCH_QDRANT_PATH = 'work/r1-media/editing/qdrant'
 & .\.venv\Scripts\python.exe -m uvicorn cutsieve.presentation.api.app:create_app --factory --host 127.0.0.1 --port 8173 --workers 1
 ```
+
+Worker 默认复用后端的 `.venv`。文件默认保存到 `work/r1-media`，可用 `CUTSIEVE_R1_MEDIA_DIR` 指定其他位置。
 
 另开一个 PowerShell 启动前端开发服务器：
 
@@ -44,29 +67,12 @@ $env:CUTSIEVE_DEV_PROXY_TARGET = 'http://127.0.0.1:8173'
 npm run dev -- --host 127.0.0.1 --port 5175
 ```
 
-打开 `http://127.0.0.1:5175/` 即可进入本地工作台：
+打开 `http://127.0.0.1:5175/`，在 **「系统状态」** 中确认 ASR、OCR、向量检索和 FFmpeg 均已就绪。也可查看 `GET http://127.0.0.1:8173/v1/capabilities`，其中 `embedding` 应为 `configured: true`、`ready: true`、`verified: true`，且 `versions` 仅含 `vision`。
+
 1. 点击顶栏 **「+ 添加视频」** 上传素材，在 **「素材与笔记」** 查看镜头采样、索引进度与时间码观影笔记；
 2. 在右侧对话助手中用自然语言查证台词或画面，点击带时间戳的引用胶囊即可让左上角监视器跳转到原片对应位置；
 3. 让 Agent 执行跨时段粗剪、设置 `300ms` 音频淡入淡出、静音或导出 MP4 / WebM / MKV；
 4. 点击顶栏 **「运行轨迹」** 或对话卡片上的 **「轨迹」**，查看每步工具耗时、自修复标记、帧卸载/压缩次数与生命周期事件。
-
----
-
-## 3. 启用本地离线 Faster-Whisper 语音转写（无字幕视频推荐）
-
-对没有内嵌字幕的录屏、访谈或会议视频，只需在当前 `.venv` 安装 `faster-whisper` 并下载轻量模型（如 `Systran/faster-whisper-tiny`，约 75 MB）：
-
-```powershell
-& .\.venv\Scripts\python.exe -m pip install faster-whisper
-```
-
-然后在 `.env` 中指向本地模型目录（未指定 `CUTSIEVE_MEDIA_PYTHON` 时，Worker 默认复用当前 `.venv` 的 Python）：
-
-```dotenv
-CUTSIEVE_WHISPER_DIR=C:/path/to/faster-whisper-tiny
-```
-
-重启后端后访问 `GET http://127.0.0.1:8173/v1/capabilities`，看到 `ASR` 的 `ready: true` 即生效。数据默认保存在 `work/r1-media`（可通过 `CUTSIEVE_R1_MEDIA_DIR` 修改）。
 
 ---
 
@@ -90,20 +96,12 @@ npm run build
 
 ---
 
-## 5. 可选：启用 Qdrant 语义/跨模态向量检索
+## 5. 可选扩展 BGE-M3 文本向量
 
-在装有 PyTorch、Transformers 与 Pillow 的环境中启动本地编码服务：
-
-```powershell
-python scripts/serve_search_encoder.py --text 'C:/models/bge-m3' --port 18176
-```
-
-在 `.venv` 中安装 `search-index` 扩展并配置环境变量后重启后端：
+数百小时以上的片库可以把本地 BGE-M3 权重放入 `work/models/bge-m3`，然后用同一个端口重启编码器并额外启用 `text` 空间。
 
 ```powershell
-& .\.venv\Scripts\python.exe -m pip install -c constraints-py312.txt -e ".[test,search-index]"
-$env:CUTSIEVE_SEARCH_ENCODER_URL = 'http://127.0.0.1:18176'
-$env:CUTSIEVE_SEARCH_QDRANT_PATH = 'work/r1-media/editing/qdrant'
+python scripts/serve_search_encoder.py --vision work/models/chinese-clip-vit-base-patch16 --text work/models/bge-m3 --port 18176
 ```
 
-在界面中重新处理素材即可发布带向量的新索引。更多内部机制见 [架构说明](ARCHITECTURE.md)。
+在「素材与笔记」中重新处理现有素材，即可发布含新增向量空间的索引。日常单片的台词、转写与画面文字检索使用 FTS5，视觉召回使用 Chinese-CLIP。更多细节见 [架构说明](ARCHITECTURE.md)。

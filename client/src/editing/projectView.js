@@ -3,14 +3,15 @@ export const stateNames = {
   FAILED: '失败', CANCELLED: '已取消', WAITING_JOB: '等待后台作业', AWAITING_INPUT: '等待补充信息', WAITING: '等待中',
   READY: '待执行', CLAIMED: '已领取', BLOCKED: '等待依赖', SUPERSEDED: '目标已替换',
   SUPPORTED: '有直接依据', UNCERTAIN: '待确认', NOT_CHECKED: '候选', CONFLICTING: '依据冲突',
-  PLANNED: '已规划', DECODED: '已解码', OBSERVED: '已观察', QUERY_VERIFIED: '已按问题核查',
+  PLANNED: '已规划', DECODED: '已解码', OBSERVED: '已观察', MODEL_OBSERVED: '已观察', QUERY_VERIFIED: '已按问题核查',
   AVAILABLE: '可用', UNCONFIGURED: '未配置', PENDING: '待处理',
   ROUTE: '识别任务目标', PLAN: '规划任务', PROPOSE: '拟定剪辑方案', COMMIT: '提交时间线', RENDER: '渲染成片', REVIEW: '核查结果', DONE: '已结束',
   SAMPLING: '抽取源帧', NOTES: '生成观影笔记', INDEXING: '建立检索索引', PUBLISHED: '索引已发布',
   RESUMING: '恢复处理中', DELETED: '清理已完成',
   ASR: '语音', OCR: '画面文字', VISUAL: '画面', MATERIAL: '选材',
-  asr: '语音转写', ocr: '画面文字', visual_observation: '画面观察', text_embedding: '文字索引', image_embedding: '图片索引',
-  'embedded-subtitle': '内嵌字幕', 'faster-whisper': '语音转写', 'paddleocr': '画面文字', 'sampled-frame': '采样画面',
+  asr: '语音转写', ocr: '画面文字', visual_observation: '画面观察', text_embedding: '语义向量 (Qdrant)', image_embedding: '图像向量 (Qdrant)',
+  'embedded-subtitle': '内嵌字幕', 'faster-whisper': '语音转写', 'paddleocr': '画面文字',
+  'rapidocr-onnxruntime': '画面文字', 'sampled-frame': '采样画面',
 }
 export const label = value => stateNames[value] || value
 export const exportFormats = [

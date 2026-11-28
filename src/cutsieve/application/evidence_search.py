@@ -300,8 +300,6 @@ class EvidenceSearch:
             )
         if self.encoder:
             self.encoder.rank(text, image, rows, routes, warnings)
-        elif text:
-            warnings.append("语义编码器未配置，本次文字召回使用词法索引")
         if not image_id and not query_literal(text) and (color := SCENE_COLOR.search(normalize_text(text))):
             center, radius = HUES[color.group(1) or color.group(2)]
             ranked = self.color_frames(rows, center, radius, warnings)

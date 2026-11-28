@@ -21,6 +21,15 @@ def asr_model_config(env):
     return root, interpreter
 
 
+def ocr_model_config(env):
+    root = env.get("CUTSIEVE_PADDLE_OCR_DIR") or ""
+    if env.get("CUTSIEVE_OCR_ENGINE", "").strip().lower() == "rapidocr" or root.strip().lower() == "rapidocr":
+        root = "rapidocr"
+    elif root:
+        root = str(Path(root).resolve())
+    return root, env.get("CUTSIEVE_MEDIA_PYTHON") or sys.executable
+
+
 def aligned_words(model, audio, text, language, offset):
     """Align an existing transcript to its own audio span with Whisper's acoustic model."""
     from faster_whisper.audio import pad_or_trim
@@ -135,7 +144,25 @@ def build_asr(root):
     return "faster-whisper", version("faster-whisper"), infer
 
 
-def build_ocr(root):
+def build_ocr(root, *, engine=None):
+    if engine is None:
+        engine = os.environ.get("CUTSIEVE_OCR_ENGINE", "")
+    if str(root).strip().lower() == "rapidocr" or engine.strip().lower() == "rapidocr":
+        from rapidocr_onnxruntime import RapidOCR
+
+        model = RapidOCR()
+
+        def infer(path):
+            result, _ = model(str(path))
+            return {"lines": [
+                dict(text=str(text), confidence=float(score), polygon=[[float(x), float(y)] for x, y in polygon])
+                for polygon, text, score in result or []
+                if text is not None and str(text).strip()
+            ]}
+
+        return "rapidocr-onnxruntime", version("rapidocr-onnxruntime"), infer
+
+    root = Path(root)
     # The model paths are local. Disable Paddle's connectivity probe as well.
     os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
     os.environ["PADDLE_PDX_CACHE_HOME"] = str(root.parent)
@@ -174,7 +201,10 @@ def main():
     pending = [entry for entry in cfg["inputs"] if not Path(entry["output"]).is_file()]
     if not pending:
         return
-    name, ver, infer = (build_asr if cfg["mode"] == "asr" else build_ocr)(root)
+    if cfg["mode"] == "asr":
+        name, ver, infer = build_asr(root)
+    else:
+        name, ver, infer = build_ocr(root, engine=cfg.get("engine"))
     for item in pending:
         output = Path(item["output"])
         record = infer(Path(item["path"]))

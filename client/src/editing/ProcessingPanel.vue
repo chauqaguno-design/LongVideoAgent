@@ -28,8 +28,36 @@ async function showCharges(id) {
 
 const submit = makeCommand()
 const active = computed(() => runs.value.find(pending))
+const published = computed(() => runs.value.some(run => run.stage === 'PUBLISHED'))
+const vectorStages = ['text_embedding', 'image_embedding']
+const stageOrder = ['asr', 'ocr', 'image_embedding', 'visual_observation']
+const stageByName = computed(() => {
+  const byName = new Map((info.value?.capabilities || []).map(stage => [stage.name, stage]))
+  for (const name of vectorStages) {
+    const stage = byName.get(name)
+    if (!stage || stage.storage === 'local') byName.set(name, { name, state: 'UNCONFIGURED' })
+    else if (stage.state === 'AVAILABLE' && !stage.storage) byName.set(name, { ...stage, state: 'UNCERTAIN' })
+  }
+  return byName
+})
+const optionalText = computed(() => ['SKIPPED', 'UNCONFIGURED'].includes(stageByName.value.get('text_embedding').state))
+const stages = computed(() => {
+  const names = optionalText.value ? stageOrder : [...stageOrder, 'text_embedding']
+  return names.map(name => stageByName.value.get(name)).filter(Boolean)
+})
+const stageTone = { AVAILABLE: 'ready', RUNNING: 'running', PARTIAL: 'partial', FAILED: 'failed' }
+const runTone = { SUCCEEDED: 'ready', PARTIAL: 'partial', FAILED: 'failed', RUNNING: 'running' }
 let timer
 let controller
+
+function stageStatus(stage) {
+  if (stage.name === 'asr' && stage.state === 'SKIPPED') return stage.reason
+  if (stage.state === 'AVAILABLE') {
+    if (stage.name === 'asr') return stage.reason === '原片没有音轨' ? stage.reason : '已完成'
+    if (vectorStages.includes(stage.name)) return '已就绪'
+  }
+  return label(stage.state)
+}
 
 watch(
   () => props.assets,
@@ -93,7 +121,7 @@ async function change(cancel) {
     if (cancel) await submit('/processing-runs/' + active.value.processing_run_id + '/cancel', { reason: '用户取消处理' })
     else {
       await submit('/assets/' + selected.value + '/processing-runs', {
-        requested_capabilities: ['asr', 'ocr', 'visual_observation', 'text_embedding', 'image_embedding'],
+        requested_capabilities: ['asr', 'ocr', 'visual_observation', 'image_embedding'],
         force_rebuild: false,
       })
     }
@@ -177,19 +205,20 @@ function seek(range) {
     <p v-if="!assets.length">请先上传视频。</p>
     <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
 
-    <ul v-if="info?.capabilities?.length" class="cap-list">
-      <li
-        v-for="c in info.capabilities"
-        :key="c.name"
-        :class="c.state === 'AVAILABLE' ? 'cap-available' : 'cap-unconfigured'"
-      >
-        {{ label(c.name) }} · {{ label(c.state) }} <small>{{ c.reason }}</small>
+    <ul v-if="info" class="cap-list" aria-label="检索与处理能力">
+      <li class="status-pill" :data-tone="published ? 'ready' : undefined">
+        全文检索 (FTS5) · {{ published ? '已就绪' : '待建库' }}
+      </li>
+      <li v-for="c in stages" :key="c.name" class="status-pill" :data-tone="stageTone[c.state]">
+        {{ label(c.name) }} · {{ stageStatus(c) }}
+        <small v-if="c.reason && c.reason !== stageStatus(c)">{{ c.reason }}</small>
       </li>
     </ul>
+    <p v-if="info && optionalText" class="cap-optional-note">语义向量 (Qdrant) · 可选（文字默认走 FTS5）</p>
 
     <ol v-if="runs.length" class="run-list">
       <li v-for="r in runs" :key="r.processing_run_id">
-        <strong>{{ label(r.status) }}</strong> · {{ label(r.stage) }}
+        <strong class="status-pill" :data-tone="runTone[r.status]">{{ label(r.status) }}</strong> · {{ label(r.stage) }}
         <span>已处理 <span class="mono">{{ r.completed_units }}{{ r.total_units == null ? '' : ' / ' + r.total_units }}</span></span>
         <span v-if="r.cancel_requested_at">已请求取消</span>
         <p v-if="r.error" role="alert">{{ r.error.message }}</p>
