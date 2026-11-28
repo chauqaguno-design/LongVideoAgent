@@ -1,3 +1,5 @@
+const workflowBoundaries = new Set(['NEEDS_INPUT', 'RUN_COMPLETED', 'RUN_FAILED', 'RUN_CANCELLED'])
+
 export async function consumeStream(body, onEvent, signal, current = () => !signal.aborted) {
   const reader = body.getReader()
   const cancel = () => {
@@ -21,7 +23,7 @@ export async function consumeStream(body, onEvent, signal, current = () => !sign
           .join('\n')
         if (!data) continue
         const event = JSON.parse(data)
-        const terminal = event.state === 'COMPLETED' || event.state === 'FAILED'
+        const terminal = workflowBoundaries.has(event.type) || event.state === 'COMPLETED' || event.state === 'FAILED'
         if (terminal) cancel()
         await onEvent(event)
         if (terminal) return true

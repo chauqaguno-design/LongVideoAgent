@@ -1,1 +1,0 @@
-Check only the named revision and frames actually shown. Report a concrete issue with the sampled frame indices. Structural measurements come from the renderer. Use uncertainty when the samples cannot establish a conclusion.

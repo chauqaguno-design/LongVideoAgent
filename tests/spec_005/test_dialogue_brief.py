@@ -1,42 +1,37 @@
-"""AT-025 exercises the public edit workflow with a known spoken word and timestamped captions."""
+"""Ground an edit in real subtitle cues and verify the source audio in the export."""
 
+import json
 from array import array
 from math import sqrt
 import os
 from pathlib import Path
 import shutil
 import subprocess
-import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from cutsieve.application.edit_instructions import literal_plan
+from cutsieve.application.edit_timeline import EditError
 from cutsieve.application.evidence_search import exclude_subtitles
-from cutsieve.application.workflow_state import NeedsInput
 from cutsieve.presentation.api.app import create_app
 
 
 def test_subtitle_exclusions_use_covered_half_open_intervals():
-    plan = literal_plan("字幕必须包含「Ticket」，不得包含字幕「spoiler」，目标时长2秒")
-    assert plan["query"] == "Ticket" and plan["must_exclude"] == ["spoiler"]
     hits = [dict(media_revision_id="m", range=dict(start_us=n, end_us=n + 10)) for n in (0, 10, 20, 30)]
     row = dict(
         source="embedded-subtitle", media_revision_id="m", claim="EXCLUDE", range=dict(start_us=19, end_us=20)
     )
     covered = {"m": [dict(start_us=0, end_us=30)]}
     assert exclude_subtitles(hits, ["exclude"], [row], covered) == [hits[0], hits[2]]
-    with pytest.raises(NeedsInput, match="缺少.*字幕"):
+    with pytest.raises(EditError, match="缺少.*字幕"):
         exclude_subtitles(hits, ["exclude"], [], {})
-    assert literal_plan("包含字幕「Ticket」，排除字幕「end」，总时长2秒，保留讲话并移除所有红色物体") is None
 
 
 @pytest.mark.real_media
-def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_path, monkeypatch):
+def test_subtitle_selection_keeps_source_speech(tmp_path, fake_agent, wait_state):
     ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
-    monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
 
     def ff(*args):
         return subprocess.run(
@@ -52,7 +47,7 @@ def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_pat
         "3\n00:00:03,000 --> 00:00:04,000\nTicket!\n",
         encoding="utf8",
     )
-    source, silent = tmp_path / "source.mp4", tmp_path / "silent.mp4"
+    source = tmp_path / "source.mp4"
     ff(
         "-f",
         "lavfi",
@@ -78,9 +73,7 @@ def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_pat
         "mov_text",
         str(source),
     )
-    ff("-i", str(source), "-map", "0:v", "-map", "0:s", "-c", "copy", str(silent))
-
-    with TestClient(create_app(work_dir=tmp_path / "app")) as client:
+    with TestClient(create_app(work_dir=tmp_path / "app", agent_transport=fake_agent)) as client:
 
         def post(path, **body):
             response = client.post(path, json=body)
@@ -102,40 +95,35 @@ def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_pat
                 f"/v1/uploads/{asset['upload_id']}/complete",
                 idempotency_key="complete-" + path.stem,
                 parts=[dict(part_number=1, etag=put.headers["ETag"])],
-            )["media_revision_id"]
-
-        def edit(revision, text, key):
-            job = post(
-                "/v1/workflow-runs",
-                scope=dict(project_id=project, media_revision_ids=[revision]),
-                message=text,
-                intent="EDIT",
-                idempotency_key="edit-brief-" + key,
             )
-            path = "/v1/workflow-runs/" + job["run_id"]
-            for _ in range(400):
-                state = client.get(path).json()
-                if state["status"] in {"SUCCEEDED", "AWAITING_INPUT", "FAILED"}:
-                    assert state["status"] != "FAILED", state
-                    assert state["budget_usage"]["model_calls"] == 0
-                    return state, (
-                        client.get(path + "/result").json() if state["status"] == "SUCCEEDED" else None
-                    )
-                time.sleep(0.1)
-            pytest.fail("The edit workflow did not reach a terminal or clarification state")
 
-        revision = upload(source)
+        asset = upload(source)
+        jobs = client.get(f"/v1/assets/{asset['asset_id']}/processing-runs").json()["items"]
+        wait_state(client, "/v1/processing-runs/" + jobs[0]["processing_run_id"], ("SUCCEEDED", "PARTIAL"))
+        revision = asset["media_revision_id"]
+        tool, reply = fake_agent.tool, fake_agent.reply
+
+        def select_spoken_intervals(request):
+            hits = json.loads(request["messages"][-1]["content"])["hits"]
+            clips = [
+                dict(media_revision_id=revision, start_s=hit["start_s"], end_s=hit["end_s"],
+                     evidence_ids=[hit["evidence_id"]])
+                for hit in hits if hit["source"] == "embedded-subtitle" and "spoiler" not in hit["text"]
+            ]
+            assert len(clips) == 2
+            return reply(tool("cut", "edit_timeline", dict(clips=clips)), tool("render", "render_video", dict(profile="EXPORT")))
+
+        fake_agent.responses = [
+            reply(tool("subtitle", "search_evidence", dict(query='subtitle: "Ticket"', mode="ALL"))),
+            select_spoken_intervals,
+            reply(text="已导出两个包含 Ticket 的片段，保留原声。"),
+        ]
         instruction = "总时长2.5秒，保留讲话，包含字幕「Ticket」，排除字幕「spoiler」，并导出"
-        state, result = edit(revision, instruction, "combined")
-        assert state["status"] == "SUCCEEDED", state
-        brief = result["brief"]
-        assert brief["duration_target_us"] == 2_500_000 and brief["duration_tolerance_us"] == 2_000_000
-        assert brief["audio_policy"] == "KEEP_SOURCE"
-        assert (
-            brief["must_include"] == ["Ticket"]
-            and brief["must_exclude"] == ["spoiler"]
-            and brief["goal"] == instruction
-        )
+        job = post(f"/v1/projects/{project}/conversation-runs", media_revision_id=revision, message=instruction,
+                   idempotency_key="edit-spoken-lines")
+        path = "/v1/workflow-runs/" + job["run_id"]
+        wait_state(client, path)
+        result = client.get(path + "/result").json()
         timeline = client.get(
             f"/v1/edit-projects/{result['edit_project_id']}/revisions/{result['revision_id']}"
         ).json()
@@ -182,29 +170,3 @@ def test_combined_brief_selects_supported_dialogue_and_reports_conflicts(tmp_pat
             assert (
                 sum(x * y for x, y in zip(a, b)) / sqrt(sum(x * x for x in a) * sum(y * y for y in b)) > 0.95
             )
-
-        for text, media, key, reason in (
-            (instruction.replace("2.5秒", "5秒"), revision, "duration", "目标 5 秒"),
-            (
-                instruction.replace("排除字幕「spoiler」", "排除字幕「Ticket」"),
-                revision,
-                "impossible",
-                "包含了要求排除",
-            ),
-            (
-                instruction.replace("「Ticket」，排除字幕「spoiler」", "「spoiler」，排除字幕「Ticket」"),
-                revision,
-                "overlap",
-                "均与要求排除的字幕重叠",
-            ),
-            (instruction, upload(silent), "silent", "没有原音轨"),
-            (
-                instruction.replace("包含字幕", "包含台词").replace("排除字幕", "排除台词"),
-                revision,
-                "audible-exclusion",
-                "排除声音或画面",
-            ),
-        ):
-            state, result = edit(media, text, key)
-            assert state["status"] == "AWAITING_INPUT" and result is None
-            assert reason in state["awaiting_input"]["question"]

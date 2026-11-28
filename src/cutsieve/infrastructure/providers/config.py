@@ -5,10 +5,25 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Mapping
 from urllib.parse import urlsplit
+
+
+_SNAPSHOT_SUFFIX = re.compile(r"-(?:[0-9]{8}|[0-9]{4}-[0-9]{2}-[0-9]{2})\Z")
+
+
+def compatible_model(expected, actual) -> bool:
+    """Compare names across provider namespaces and date-stamped snapshots."""
+    if not isinstance(expected, str) or not isinstance(actual, str):
+        return False
+    expected = expected.rsplit("/", 1)[-1].strip()
+    actual = actual.rsplit("/", 1)[-1].strip()
+    expected_base = _SNAPSHOT_SUFFIX.sub("", expected) or expected
+    actual_base = _SNAPSHOT_SUFFIX.sub("", actual) or actual
+    return bool(expected_base) and expected_base == actual_base
 
 
 class ProviderConfigurationError(ValueError):
@@ -182,7 +197,7 @@ class ProviderConfig:
             f"{prefix}MODEL_NAME",
             f"{prefix}LLM_MODEL",
             "LLM_MODEL",
-        ) or "deepseek-flash"
+        ) or "deepseek-v4-flash"
         api_key = _first_value(
             values,
             f"{prefix}MODEL_API_KEY",
@@ -230,10 +245,6 @@ def configured_model(env: Mapping[str, str]) -> ProviderConfig | None:
 
 def model_supports_vision(env: Mapping[str, str]) -> bool:
     return env.get("CUTSIEVE_MODEL_VISION", "1") == "1"
-
-
-def model_tool_mode(env: Mapping[str, str]) -> str:
-    return "native" if env.get("CUTSIEVE_MODEL_NATIVE_TOOLS") == "1" else "json"
 
 
 def _first_value(values: Mapping[str, str], *names: str) -> str | None:

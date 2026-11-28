@@ -1,29 +1,22 @@
-"""Poll the persistent queue. One claim executes one bounded stage outside the SQL transaction."""
+"""Claim work, renew its lease and let the agent yield on render or user input."""
 
 import asyncio
-from copy import copy
-from hashlib import sha256
 import hmac
 import json
 import logging
 import time
+from hashlib import sha256
 from urllib.parse import urlencode
 
 from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
-from cutsieve.application.conversation_runs import candidate_cards, route_turn
+from cutsieve.application.agent_harness import AgentHarness
 from cutsieve.application.edit_timeline import EditError, uid
-from cutsieve.application.stages import StageDeps
-from cutsieve.application.stages.edit import run_edit
-from cutsieve.application.stages.material import run_material
-from cutsieve.application.stages.plan import run_plan
-from cutsieve.application.stages.review import run_review
-from cutsieve.application.workflow_checkpoint import PlanAttempt
-from cutsieve.application.workflow_state import NeedsInput, public_error, utc
-from cutsieve.application.workflow_inspections import WaitInspection, pending_inspection, run_inspection
-from cutsieve.infrastructure.providers.workflow_flash import FlashPlanner
+from cutsieve.application.workflow_state import utc
+
 from .workflow_repository import StaleLease
+
 
 log = logging.getLogger(__name__)
 
@@ -33,9 +26,9 @@ def json_bytes(value):
 
 
 class WorkflowWorker:
-    def __init__(self, repo, app, sign):
-        self.repo, self.app, self.sign = repo, app, sign
-        self.planner = FlashPlanner()
+    def __init__(self, repo, app, sign, *, transport=None):
+        self.repo, self.sign = repo, sign
+        self.harness = AgentHarness(repo, app.state.evidence_search, app.state.edit_worker, transport=transport)
         self.worker_id = uid()
         self.task = None
 
@@ -54,7 +47,7 @@ class WorkflowWorker:
             try:
                 claim = await asyncio.to_thread(self.repo.claim, self.worker_id)
                 if claim:
-                    task = asyncio.create_task(asyncio.to_thread(self.run_stage, claim))
+                    task = asyncio.create_task(asyncio.to_thread(self.run_claim, claim))
                     while not task.done():
                         done, _ = await asyncio.wait((task,), timeout=15)
                         if not done:
@@ -62,6 +55,8 @@ class WorkflowWorker:
                                 await asyncio.to_thread(self.repo.renew, claim)
                             except StaleLease:
                                 pass
+                            except SQLAlchemyError:
+                                log.warning("Workflow lease renewal unavailable")
                     await task
                     continue
             except SQLAlchemyError:
@@ -71,104 +66,28 @@ class WorkflowWorker:
             except TimeoutError:
                 pass
 
-    def run_stage(self, claim):
-        started = time.monotonic()
-        planner = self.planner
-        if claim.checkpoint.spec.conversation is not None:
-            route = claim.checkpoint.attempt.route_decision or {}
-            enabled = planner.env.get(
-                "CUTSIEVE_CHAT_LIVE_MODEL", planner.env.get("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
-            )
-            funded = claim.state["budget_usage"]["limits"]["max_cost_microunits"] > 0
-            needs_model = (
-                claim.checkpoint.attempt.intent == "AUTO"
-                or "INSPECT" in route.get("plan", [])
-                or route.get("source") == "MODEL"
-            )
-            planner = copy(planner)
-            planner.env = dict(
-                planner.env, CUTSIEVE_WORKFLOW_LIVE_MODEL=enabled if funded and needs_model else "0"
-            )
-        deps = StageDeps(
-            self.repo,
-            getattr(self.app.state, "evidence_search", None),
-            planner,
-            getattr(self.app.state, "edit_worker", None),
-        )
+    def run_claim(self, claim):
         try:
-            if claim.checkpoint.attempt.intent == "AUTO":
-                outcome = route_turn(self.repo, planner, claim)
-            elif job := pending_inspection(claim):
-                outcome = run_inspection(self.repo, planner, deps.render_worker, claim, job)
-            else:
-                match claim.state["phase"]:
-                    case "PLAN":
-                        outcome = run_plan(deps, claim)
-                    case "MATERIAL":
-                        outcome = run_material(deps, claim)
-                    case "PROPOSE" | "COMMIT" | "RENDER":
-                        outcome = run_edit(deps, claim)
-                    case "REVIEW":
-                        outcome = run_review(deps, claim)
-                    case phase:
-                        raise KeyError(phase)
-            result = outcome.get("docs", {}).get("result", {})
-            if claim.checkpoint.spec.conversation is not None and "claims" in result:
-                (media_id,) = claim.checkpoint.spec.scope.media_revision_ids
-                attempt = outcome.get("attempt") or PlanAttempt()
-                attempt.conversation_candidates = candidate_cards(
-                    self.repo,
-                    claim.workspace_id,
-                    result["claims"],
-                    media_id,
-                    generation=claim.checkpoint.spec.index_generation_id,
-                )
-                outcome["attempt"] = attempt
-        except WaitInspection as wait:
-            outcome = wait.outcome
+            self.harness.run(claim)
         except StaleLease:
             self.repo.stopped(claim)
-            return
-        except NeedsInput as exc:
-            outcome = dict(state=dict(status="AWAITING_INPUT", awaiting_input=exc.input), event="NEEDS_INPUT")
-        except (EditError, HTTPException) as exc:
-            if isinstance(exc, EditError):
-                code, message, retry = exc.code, str(exc), exc.status == 503
-            else:
-                code, message, retry = "RESOURCE_UNAVAILABLE", str(exc.detail), exc.status_code == 503
-            outcome = dict(
-                state=dict(status="FAILED", pending_job_ids=[], error=public_error(code, message, retry)),
-                event="FAILED",
-            )
+        except SQLAlchemyError:
+            # A reclaimed lease reconciles the last committed checkpoint.
+            raise
+        except EditError as exc:
+            self.fail(claim, exc.code, str(exc), exc.status >= 500)
+        except HTTPException as exc:
+            self.fail(claim, "RESOURCE_UNAVAILABLE", str(exc.detail), exc.status_code >= 500)
         except Exception:
-            log.exception("Workflow stage failed: %s / %s", claim.id, claim.state["phase"])
-            outcome = dict(
-                state=dict(
-                    status="FAILED", error=public_error("STAGE_FAILED", "该阶段执行失败，可以重试", True)
-                ),
-                event="FAILED",
-            )
+            log.exception("Workflow agent failed for %s", claim.id)
+            self.fail(claim, "AGENT_FAILED", "The agent could not finish this turn. Resume to retry.", True)
+
+    def fail(self, claim, code, message, retryable):
         try:
-            if not outcome.get("sleep"):
-                payload = outcome.get("payload") or {}
-                outcome["payload"] = dict(
-                    payload,
-                    stage=claim.state["phase"],
-                    stage_latency_ms=int((time.monotonic() - started) * 1000),
-                )
-            self.repo.advance(claim, **outcome)
+            with self.repo.change(claim) as (db, row):
+                self.repo.fail(db, row, code, message, retryable)
         except StaleLease:
             self.repo.stopped(claim)
-        except (EditError, HTTPException) as exc:
-            code = exc.code if isinstance(exc, EditError) else "RESOURCE_UNAVAILABLE"
-            try:
-                self.repo.advance(
-                    claim,
-                    state=dict(status="FAILED", pending_job_ids=[], error=public_error(code, str(exc))),
-                    event="FAILED",
-                )
-            except StaleLease:
-                self.repo.stopped(claim)
 
     def artifact(self, workspace, key, request):
         row = self.repo.document(workspace, key)

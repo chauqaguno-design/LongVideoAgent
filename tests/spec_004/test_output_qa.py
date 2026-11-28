@@ -3,20 +3,16 @@
 import json
 import shutil
 import subprocess
+from base64 import b64decode
+from io import BytesIO
 
 import pytest
+from PIL import Image
 from sqlalchemy import create_engine, insert, select
 
+from cutsieve.application.agent_tools import AgentTools, Frames
 from cutsieve.application.edit_sources import EditSources
-from cutsieve.application.edit_timeline import uid
-from cutsieve.application.workflow_checkpoint import PlanAttempt
-from cutsieve.application.workflow_inspections import (
-    WaitInspection,
-    inspection,
-    pending_inspection,
-    run_inspection,
-)
-from cutsieve.application.workflow_state import DEFAULT_BUDGET
+from cutsieve.application.edit_timeline import EditError, uid
 from cutsieve.infrastructure.edit_captions import Cue, write_srt
 from cutsieve.infrastructure.edit_media import inspect_output
 from cutsieve.infrastructure.media.source_artifacts import digest_file
@@ -27,7 +23,6 @@ from cutsieve.infrastructure.persistence.source_tables import projects, sources
 from cutsieve.infrastructure.persistence.sqlalchemy import Base
 from cutsieve.infrastructure.persistence.workflow_repository import WorkflowRepository
 from cutsieve.infrastructure.persistence.workflow_tables import WORKFLOW_TABLES
-from test_workflow_vision import ColorSequenceVerifier
 
 
 def render_control(root, tools, edits, scope, project, cues):
@@ -106,33 +101,15 @@ def render_control(root, tools, edits, scope, project, cues):
     return worker, manifest, result["artifact_id"], path("artifact_id")
 
 
-def inspect_frames(repo, worker, scope, project, revision, aid, case):
-    repo.create(
-        scope,
-        dict(
-            scope=dict(project_id=project),
-            intent="EDIT",
-            message="画面从红色变成蓝色",
-            budget=dict(DEFAULT_BUDGET, max_cost_microunits=100000),
-            idempotency_key=case,
-        ),
+def inspect_frames(repo, worker, scope, project, artifact_id, case):
+    repo.create(scope, dict(scope=dict(project_id=project), message="画面从红色变成蓝色", idempotency_key=case))
+    row = repo.claim(uid())
+    output = AgentTools(repo, None, worker).inspect_frames(
+        row, Frames(artifact_id=artifact_id, timestamps_s=[.25, 1.25])
     )
-    row = repo.claim(uid())
-    repo.advance(
-        row, attempt=PlanAttempt(revision_id=revision, export_artifact_id=aid), state=dict(status="RUNNING")
-    )
-    row = repo.claim(uid())
-    with pytest.raises(WaitInspection) as queued:
-        inspection(row, "final-output", None, dict(start_us=0, end_us=2_000_000), "红色变蓝色", preview=aid)
-    repo.advance(row, **queued.value.outcome)
-    row = repo.claim(uid())
-    job = pending_inspection(row)
-    result = run_inspection(repo, ColorSequenceVerifier(), worker, row, job)
-    repo.advance(row, **result)
-    row = repo.claim(uid())
-    outcome = row.checkpoint.context.inspections[job["job_id"]]
-    repo.advance(row, state=dict(status="SUCCEEDED"))
-    return outcome
+    with repo.change(row) as (db, current):
+        repo.complete(db, current, current.checkpoint.result("Checked frames."))
+    return output
 
 
 @pytest.mark.real_media
@@ -180,12 +157,11 @@ def test_playable_wrong_event_and_shifted_caption_have_independent_results(tmp_p
         ],
         check=True,
     )
-    results = {}
     for label, path, structural, semantic in (
-        ("control", control, "PASSED", "SUPPORTED"),
-        ("wrong-event", wrong_event, "PASSED", "CONFLICTING"),
-        ("shifted-subtitle", shifted, "FAILED", "SUPPORTED"),
-        ("missing-audio", missing_audio, "FAILED", "SUPPORTED"),
+        ("control", control, "PASSED", [0, 2]),
+        ("wrong-event", wrong_event, "PASSED", [2, 0]),
+        ("shifted-subtitle", shifted, "FAILED", [0, 2]),
+        ("missing-audio", missing_audio, "FAILED", [0, 2]),
     ):
         aid = control_id
         if path != control:
@@ -210,44 +186,27 @@ def test_playable_wrong_event_and_shifted_caption_have_independent_results(tmp_p
             assert "subtitle times" in check["issue"]
         if label == "missing-audio":
             assert "audio stream" in check["issue"]
-        outcome = inspect_frames(repo, worker, scope, project, revision, aid, label)
-        report = outcome["report"]
-        sequence = repo.document(scope, report["sequence_id"]).body
-        assert report["support"] == semantic
-        assert (
-            revision
-            == check["timeline_revision_id"]
-            == report["timeline_revision_id"]
-            == sequence["timeline_revision_id"]
-        )
-        assert check["output_sha256"] == report["output_sha256"] == sequence["output_sha256"] == digest_file(path)
-        assert aid == report["output_artifact_id"] == sequence["output_artifact_id"]
-        results[label] = dict(
-            file=path.relative_to(tmp_path).as_posix(),
-            structure=check,
-            semantic=report,
-            actual_us=[f["actual_us"] for f in sequence["frames"]],
-        )
-    stale = inspect_frames(repo, worker, scope, project, uid(), control_id, "wrong-revision")
-    assert stale["status"] == "FAILED" and stale["error"]["code"] == "OUTPUT_REVISION_CHANGED"
+        outcome = inspect_frames(repo, worker, scope, project, aid, label)
+        assert revision == check["timeline_revision_id"] == outcome.body["revision_id"]
+        assert check["output_sha256"] == digest_file(path)
+        assert aid == outcome.body["artifact_id"]
+        assert [frame["timestamp_s"] for frame in outcome.body["frames"]] == [.25, 1.25]
+        colors = []
+        for part in outcome.images:
+            pixels = b64decode(part["image_url"]["url"].split(",", 1)[1])
+            with Image.open(BytesIO(pixels)) as image:
+                rgb = image.convert("RGB").getpixel((image.width // 2, image.height // 2))
+                colors.append(max(range(3), key=rgb.__getitem__))
+        assert colors == semantic
+    other = edits.sources.create_project(scope, "Other project")["project_id"]
+    with pytest.raises(EditError) as stale:
+        inspect_frames(repo, worker, scope, other, control_id, "wrong-project")
+    assert stale.value.status == 404
     bad_id = uid()
     original = worker.artifact_record(scope, control_id)
     with edits.write() as session:
         session.execute(insert(artifacts).values(dict(original._mapping, id=bad_id, kind="VALIDATION_REPORT")))
-    wrong_kind = inspect_frames(repo, worker, scope, project, revision, bad_id, "wrong-kind")
-    assert wrong_kind["status"] == "FAILED" and wrong_kind["error"]["code"] == "OUTPUT_REVISION_CHANGED"
-    (tmp_path / "dual-qa.json").write_text(
-        json.dumps(
-            dict(
-                revision_id=revision,
-                cases=results,
-                external_calls=0,
-                rejected=[stale["error"]["code"], wrong_kind["error"]["code"]],
-                verifier="controlled first-red/last-blue judgment on decoded output frames",
-            ),
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf8",
-    )
+    with pytest.raises(EditError) as wrong_kind:
+        inspect_frames(repo, worker, scope, project, bad_id, "wrong-kind")
+    assert wrong_kind.value.code == "NOT_A_VIDEO"
     db.dispose()

@@ -1,1 +1,0 @@
-Review the shown frames in timestamp order. A visible state transition can support an action. Keep the conclusion within the samples and report a gap if they miss a required instant. A line of dialogue alone cannot verify a visible action.

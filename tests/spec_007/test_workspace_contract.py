@@ -26,7 +26,7 @@ def wait_for(client, url, active):
     pytest.fail(f"Job did not finish: {url}")
 
 
-def prepare_workspace(client, folder, ffmpeg, name):
+def prepare_workspace(client, folder, ffmpeg, name, agent):
     project = json_body(client.post("/v1/projects", json={"title": name}))["project_id"]
     caption, movie = folder / f"{name}.srt", folder / f"{name}.mp4"
     caption.write_text(f"1\n00:00:00,100 --> 00:00:00,800\nShared ticket {name}\n", encoding="utf8")
@@ -59,17 +59,23 @@ def prepare_workspace(client, folder, ffmpeg, name):
     frame_bytes = client.get(meta["url"]).content
     query_image = json_body(client.post(f"/v1/projects/{project}/query-images",
         files={"file": ("frame.png", frame_bytes, "image/png")}))
-    run = json_body(client.post("/v1/workflow-runs", json=dict(
-        scope=scope, intent="EDIT", message="剪出 0 到 0.5 秒并导出",
+    agent.responses = [
+        agent.reply(agent.tool("edit", "edit_timeline", dict(clips=[dict(start_s=0, end_s=.5)])),
+                    agent.tool("export", "render_video", dict(profile="EXPORT"))),
+        agent.reply(text="已导出前 0.5 秒。"),
+    ]
+    run = json_body(client.post(f"/v1/projects/{project}/conversation-runs", json=dict(
+        media_revision_id=media, message="剪出 0 到 0.5 秒并导出",
         idempotency_key="same-edit-key")))["run_id"]
     base = "/v1/workflow-runs/" + run
     state = wait_for(client, base, {"QUEUED", "RUNNING", "WAITING_JOB"})
     assert state["status"] == "SUCCEEDED", state
     edit = json_body(client.get(base + "/result"))
+    export, = json_body(client.get(f"/v1/edit-projects/{edit['edit_project_id']}/render-jobs"))["items"]
     return dict(project=project, asset=aid, upload=upload["upload_id"], media=media,
                 evidence=proof["evidence_id"], observation=observation, frame=frame,
                 image=query_image["artifact_id"], run=run, result=state["result_artifact_id"],
-                edit=edit["edit_project_id"], revision=edit["revision_id"], job=edit["export_job_id"],
+                edit=edit["edit_project_id"], revision=edit["revision_id"], job=export["render_job_id"],
                 export=edit["export_artifact_id"], processing=pid, scope=scope)
 
 
@@ -79,7 +85,7 @@ RESOURCE_PATHS = (
     "/assets/{asset}/observations", "/processing-runs/{processing}", "/media-revisions/{media}",
     "/observations/{observation}", "/evidence/{evidence}", "/artifacts/{frame}", "/artifacts/{image}",
     "/artifacts/{export}", "/artifacts/{result}", "/workflow-runs/{run}", "/workflow-runs/{run}/result",
-    "/workflow-runs/{run}/events",
+    "/workflow-runs/{run}/events", "/workflow-runs/{run}/conversation",
     "/workflow-runs/{run}/jobs/{job}", "/edit-projects/{edit}", "/edit-projects/{edit}/revisions",
     "/edit-projects/{edit}/revisions/{revision}", "/edit-projects/{edit}/render-jobs", "/render-jobs/{job}",
 )
@@ -112,7 +118,7 @@ def scoped_writes(client, resources):
     ]
 
 
-def exercise_controls(client, resources):
+def exercise_controls(client, resources, agent):
     """Use a separate draft and an awaiting-input run so both can be changed safely."""
     json_body(client.get("/v1/capabilities"))
     json_body(client.get("/v1/projects"))
@@ -131,9 +137,13 @@ def exercise_controls(client, resources):
     json_body(client.post(f"/v1/render-jobs/{job['render_job_id']}/cancel", json=stop))
     request = dict(scope=resources["scope"], intent="EDIT", message="帮我剪一下",
                    idempotency_key="ask-for-clarification")
+    agent.responses = [
+        agent.reply(agent.tool("clarify", "ask_user", dict(question="要剪哪一段？", options=["开头", "结尾"]))),
+        agent.reply(text="已收到原片范围。"),
+    ]
     run = json_body(client.post("/v1/workflow-runs", json=request))
     base = "/v1/workflow-runs/" + run["run_id"]
-    assert json_body(client.get(base + "/harness"))["harness_version"] == 1
+    assert json_body(client.get(base + "/harness"))["harness_version"] == 2
     waiting = wait_for(client, base, {"QUEUED", "RUNNING", "WAITING_JOB"})
     assert waiting["status"] == "AWAITING_INPUT"
     adjust = dict(expected_state_version=waiting["state_version"], idempotency_key="extend-time",
@@ -149,15 +159,14 @@ def exercise_controls(client, resources):
 
 
 @pytest.mark.real_media
-def test_two_workspaces_share_pixels_and_request_keys_but_only_read_their_results(tmp_path, monkeypatch, use_workspace):
+def test_two_workspaces_share_pixels_and_request_keys_but_only_read_their_results(tmp_path, use_workspace, fake_agent):
     ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("FFmpeg required")
-    monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
-    with TestClient(create_app(work_dir=tmp_path / "app")) as client:
-        one = prepare_workspace(client, tmp_path, ffmpeg, "first_editor")
+    with TestClient(create_app(work_dir=tmp_path / "app", agent_transport=fake_agent)) as client:
+        one = prepare_workspace(client, tmp_path, ffmpeg, "first_editor", fake_agent)
         with use_workspace(client, 2):
-            two = prepare_workspace(client, tmp_path, ffmpeg, "second_editor")
+            two = prepare_workspace(client, tmp_path, ffmpeg, "second_editor", fake_agent)
         for user_id, own, foreign in ((1, one, two), (2, two, one)):
             with use_workspace(client, user_id):
                 unknown = {key: str(uuid4()) for key in foreign}
@@ -182,4 +191,4 @@ def test_two_workspaces_share_pixels_and_request_keys_but_only_read_their_result
                                    lambda q: client.post(f"/v1/projects/{own['project']}/search-workflows",
                                         json=dict(search=q, idempotency_key="second-search"))):
                         assert error_body(submit(query(foreign[resource]))) == error_body(submit(query(unknown[resource])))
-        exercise_controls(client, one)
+        exercise_controls(client, one, fake_agent)

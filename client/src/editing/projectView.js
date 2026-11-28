@@ -1,6 +1,6 @@
 export const stateNames = {
   QUEUED: '排队中', RUNNING: '处理中', PARTIAL: '部分完成', SUCCEEDED: '已完成',
-  FAILED: '失败', CANCELLED: '已取消', WAITING_JOB: '等待后台作业', AWAITING_INPUT: '等待补充信息',
+  FAILED: '失败', CANCELLED: '已取消', WAITING_JOB: '等待后台作业', AWAITING_INPUT: '等待补充信息', WAITING: '等待中',
   READY: '待执行', CLAIMED: '已领取', BLOCKED: '等待依赖', SUPERSEDED: '目标已替换',
   SUPPORTED: '有直接依据', UNCERTAIN: '待确认', NOT_CHECKED: '候选', CONFLICTING: '依据冲突',
   PLANNED: '已规划', DECODED: '已解码', OBSERVED: '已观察', QUERY_VERIFIED: '已按问题核查',
@@ -19,7 +19,23 @@ export const exportFormats = [
   { extension: 'mkv', label: 'MKV', mime: 'video/x-matroska' },
 ]
 export const exportFormat = mime => exportFormats.find(format => format.mime === mime)
-export const pending = run => ['QUEUED', 'RUNNING', 'WAITING_JOB'].includes(run?.status)
+export const pending = run => ['PENDING', 'QUEUED', 'RUNNING', 'WAITING_JOB'].includes(run?.status)
+export const assetStatuses = {
+  processing: '处理中', ready: '就绪', partial: '部分完成', failed: '失败',
+}
+export const usableMedia = asset => Boolean(asset?.media_revision_id && Number.isFinite(asset.duration_us))
+
+export function assetTone(asset, processingRun) {
+  const state = (asset.processing_status || processingRun?.status || asset.status || '').toUpperCase()
+  if (['PARTIAL', 'PARTIALLY_COMPLETED', 'PARTIALLY_READY'].includes(state)) return 'partial'
+  if (['FAILED', 'REJECTED', 'CANCELLED'].includes(state)) return 'failed'
+  if (['SUCCEEDED', 'READY'].includes(state)) return 'ready'
+  if (state !== 'AVAILABLE') return 'processing'
+  const capabilities = (asset.capabilities || []).map(c => c.state)
+  if (capabilities.some(s => ['PENDING', 'RUNNING'].includes(s))) return 'processing'
+  if (capabilities.includes('FAILED')) return capabilities.includes('AVAILABLE') ? 'partial' : 'failed'
+  return 'ready'
+}
 export function timecode(us) {
   const ms = Math.round(us / 1000)
   const minutes = Math.floor(ms / 60000)

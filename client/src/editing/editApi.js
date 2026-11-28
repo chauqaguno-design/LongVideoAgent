@@ -35,6 +35,17 @@ export async function listAll(path, signal) {
   return items
 }
 
+export const fileExpired = file => file.url_expires_at && Date.parse(file.url_expires_at) <= Date.now() + 1000
+
+export async function renderArtifact(id, kind, revisionId, signal) {
+  const file = await request('/artifacts/' + id, undefined, signal)
+  if (!file.url) throw new Error('成片暂不可用')
+  if (file.kind !== kind || (revisionId && file.timeline_revision_id !== revisionId)) {
+    throw new Error('成片与所选时间线版本不符')
+  }
+  return file
+}
+
 // An interrupted response can be retried with the same key, even after a commit.
 export function makeCommand() {
   let previous, key

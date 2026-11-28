@@ -79,6 +79,7 @@ def create_app(
     *,
     settings: ApiSettings | None = None,
     work_dir: Path | None = None,
+    agent_transport: object | None = None,
 ) -> FastAPI:
     if (
         work_dir is None
@@ -161,7 +162,7 @@ def create_app(
     install_edit_routes(app, local_workspace_user)
     install_processing(app, local_workspace_user)
     install_search_routes(app, local_workspace_user)
-    install_workflow_routes(app, local_workspace_user)
+    install_workflow_routes(app, local_workspace_user, transport=agent_transport)
     install_caps(app, local_workspace_user)
 
     @app.get("/", include_in_schema=False)

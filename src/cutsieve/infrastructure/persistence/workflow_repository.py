@@ -1,34 +1,62 @@
-"""A checkpoint, its event cursor, and optional tool receipt commit atomically."""
+"""Fenced workflow queue, checkpoints and events backed by the existing workflow tables."""
 
+import json
 import os
-import time
-from copy import deepcopy
+from contextlib import contextmanager
+
 from fastapi import HTTPException
-from sqlalchemy import and_, insert, select, update
+from sqlalchemy import insert, select, update
 
 from cutsieve.application.edit_timeline import EditError, missing, timestamp, uid
-from cutsieve.application.workflow_routing import candidate_reference
-from cutsieve.application.workflow_checkpoint import (
-    Checkpoint, ClipRepair, ContextManifest, PlanAttempt, RepairHistory, RunSpec,
-)
-from cutsieve.application.workflow_context import remember_evidence, remember_outputs
-from cutsieve.application.workflow_identity import generation_key, workflow_version
+from cutsieve.application.workflow_checkpoint import Checkpoint, Clarification, RunSpec, Usage
 from cutsieve.application.workflow_state import (
-    DEFAULT_BUDGET,
-    RUNNABLE,
-    TERMINAL,
-    NeedsInput,
-    budget_change,
-    new_state,
-    public_error,
-    require_version,
-    stable_id,
+    DEADLINE_SECONDS, RUNNABLE, TERMINAL, new_state, public_error, require_version, stable_id, sync_usage,
 )
-from .edit_repository import digest, one, owned, project_view
-from .edit_tables import projects, revisions
-from .workflow_tables import calls, documents, events, model_requests, runs
+from .edit_repository import job_view, one, owned
+from .edit_tables import jobs, projects
 from .work_outbox import emit
 from .workflow_clock import db_now
+from .workflow_tables import documents, events, runs
+
+
+TOOL_TEXT_LIMIT = 8_000
+
+
+def encode_tool_text(body):
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+
+
+def tool_excerpt(value):
+    if isinstance(value, str):
+        return value[:400]
+    if isinstance(value, list):
+        return [tool_excerpt(item) for item in value[:3]]
+    if isinstance(value, dict):
+        return {key: tool_excerpt(item) for key, item in value.items()}
+    return value
+
+
+def compact_tool_body(body, artifact_id):
+    compact = dict(ok=body["ok"], summary="Full tool result saved as a workflow artifact.", artifact_id=artifact_id)
+    for key, value in body.items():
+        if key in compact or isinstance(value, list):
+            continue
+        excerpt = value[:3300] if isinstance(value, str) else value
+        if len(encode_tool_text(dict(compact, **{key: excerpt}))) <= TOOL_TEXT_LIMIT - 500:
+            compact[key] = excerpt
+    for key, values in body.items():
+        if not isinstance(values, list):
+            continue
+        excerpt = {key + "_count": len(values), key: []}
+        if len(encode_tool_text(compact | excerpt)) > TOOL_TEXT_LIMIT:
+            continue
+        compact.update(excerpt)
+        for item in values:
+            item = tool_excerpt(item)
+            if len(encode_tool_text(dict(compact, **{key: [*compact[key], item]}))) > TOOL_TEXT_LIMIT - 500:
+                break
+            compact[key].append(item)
+    return compact
 
 
 class StaleLease(Exception):
@@ -43,58 +71,35 @@ class WorkflowRepository:
 
     def _event(self, db, state, event_type, payload):
         sequence = state["last_event_sequence"] + 1
-        event = dict(
-            event_id=uid(),
-            run_id=state["run_id"],
-            sequence=sequence,
-            type=event_type,
-            created_at=timestamp(),
-            payload=payload,
-        )
-        db.execute(
-            insert(events).values(id=event["event_id"], run_id=state["run_id"], seq=sequence, body=event)
-        )
+        event = dict(event_id=uid(), run_id=state["run_id"], sequence=sequence, type=event_type, payload=payload)
+        db.execute(insert(events).values(id=event["event_id"], run_id=state["run_id"], seq=sequence, body=event))
         emit(db, event["event_id"], state["workspace_id"], state["run_id"], "workflow.event")
         state.update(last_event_sequence=sequence, last_event_id=event["event_id"])
 
-    def _update(self, db, row, state, checkpoint, event_type, payload=None, *, ready=0, deadline=None):
+    def save(self, db, row, *notices, release=False, delay=0, deadline=None):
+        state, cp = row.state, row.checkpoint
         state["state_version"] += 1
-        self._event(db, state, event_type, payload or dict(phase=state["phase"], status=state["status"]))
-        db.execute(
-            update(runs)
-            .where(runs.c.id == row.id)
-            .values(
-                state=state,
-                checkpoint=checkpoint,
-                status=state["status"],
-                ready_at=ready,
-                lease=0,
-                deadline=row.deadline if deadline is None else deadline,
-            )
-        )
-
-    def trace(self, db, row, state, activity, *, origin=None, **metadata):
-        """Publish bounded execution metadata without copying prompts, tool arguments or source dialogue."""
-        origin = row if origin is None else origin
-        phase = origin.state["phase"]
-        payload = dict(
-            activity=activity,
-            phase=phase,
-            fencing_token=origin.fence,
-            **workflow_version(origin.checkpoint),
-            **metadata,
-        )
-        self._event(db, state, "PROGRESS", payload)
-        state["state_version"] += 1
-        db.execute(update(runs).where(runs.c.id == row.id).values(state=state))
+        sync_usage(state, cp.usage)
+        for event_type, payload in notices:
+            self._event(db, state, event_type, payload)
+        values = dict(state=state, checkpoint=cp, status=state["status"])
+        if release:
+            values.update(lease=0, ready_at=db_now(db) + delay)
+        if deadline is not None:
+            values["deadline"] = deadline
+        db.execute(update(runs).where(runs.c.id == row.id).values(**values))
 
     def _scope(self, workspace, scope):
         project = scope["project_id"]
         self.sources.project(workspace, project)
-        if scope.get("media_revision_ids"):
-            mids = list(dict.fromkeys(scope["media_revision_ids"]))
+        mids = list(dict.fromkeys(scope.get("media_revision_ids") or []))
+        if mids:
+            for mid in mids:
+                media = self.sources.media(workspace, mid)
+                if self.sources.asset(workspace, media["asset_id"])["project_id"] != project:
+                    raise missing()
         else:
-            cursor, mids = None, []
+            cursor = None
             while True:
                 page = self.sources.page(workspace, cursor, 100, project)
                 mids.extend(a["media_revision_id"] for a in page["items"] if a["status"] == "AVAILABLE")
@@ -103,135 +108,94 @@ class WorkflowRepository:
                     break
         if len(mids) > 1000:
             raise EditError(422, "SCOPE_TOO_LARGE", "请选定不超过一千个媒体版本")
-        for mid in mids:
-            media = self.sources.media(workspace, mid)
-            if self.sources.asset(workspace, media["asset_id"])["project_id"] != project:
-                raise missing()
-        return {"project_id": project, "media_revision_ids": mids}
+        return dict(project_id=project, media_revision_ids=mids)
 
-    def create(self, workspace, body, *, search_request=None, conversation=None):
+    def create(self, workspace, body, *, search_request=None, parent_run_id=None, image_artifact_id=None):
         project = body["scope"]["project_id"]
 
         def save(db):
             scope = self._scope(workspace, body["scope"])
-            run_id, now = uid(), db_now(db)
-            state = new_state(run_id, workspace, project, body.get("budget", dict(DEFAULT_BUDGET)))
-            cp = Checkpoint(
-                spec=RunSpec(
-                    scope=scope, message=body["message"], created=now, conversation=conversation,
-                    search_request=dict(search_request, scope=scope) if search_request is not None else None,
-                    stage_model_limit=int(os.getenv("CUTSIEVE_WORKFLOW_STAGE_MAX_MODEL_CALLS", "0")) or None,
-                ),
-                attempt=PlanAttempt(intent=body["intent"]),
-                context=ContextManifest(),
-                repair=RepairHistory(
-                    repair_limit=max(0, min(2, int(os.getenv("CUTSIEVE_WORKFLOW_REPAIR_LIMIT", "2"))))
-                ),
-            )
-            if conversation and (parent := conversation.get("parent_run_id")):
-                previous = self.readable(db, workspace, parent)
-                if previous.project_id != project or previous.checkpoint.spec.scope != cp.spec.scope:
-                    raise missing()
-            if search_request is not None:
+            if search_request:
                 media_ids = scope["media_revision_ids"]
                 if search_request["query_mode"] == "FIRST" and len(media_ids) > 1:
                     raise EditError(422, "SEARCH_SCOPE", "请选定单个视频后查找首次出现位置")
                 span = search_request.get("range")
                 if span and (
                     span["start_us"] >= span["end_us"]
-                    or any(
-                        span["end_us"] > self.sources.media(workspace, mid)["duration_us"]
-                        for mid in media_ids
-                    )
+                    or any(span["end_us"] > self.sources.media(workspace, mid)["duration_us"] for mid in media_ids)
                 ):
                     raise EditError(422, "SEARCH_RANGE", "核查区间超出原片")
-            if body.get("edit_project_id"):
-                edit = self.edits.get(
-                    projects, workspace, body["edit_project_id"], project_view, project_id=project
-                )
-                cp.attempt.edit_id = edit["edit_project_id"]
-                cp.attempt.base, cp.attempt.base_id = edit["head_revision"], edit["head_revision_id"]
-                timeline = self.edits.get(revisions, workspace, cp.attempt.base_id, lambda r: r.snapshot)
-                if any(
-                    clip["media_revision_id"] not in scope["media_revision_ids"] for clip in timeline["clips"]
-                ):
-                    raise EditError(422, "EDIT_SCOPE", "所选素材范围需要包含现有时间线的全部原片")
-            if body.get("supersedes"):
-                target = body["supersedes"]
-                previous = one(
-                    db,
-                    owned(runs, workspace, target["run_id"])
-                    .where(runs.c.project_id == project)
-                    .with_for_update(),
-                )
-                self.sources.require_readable(
-                    db, workspace, previous.checkpoint.spec.scope.media_revision_ids
-                )
-                before = deepcopy(previous.state)
-                require_version(before, target["expected_state_version"])
+            requested_media = body["scope"].get("media_revision_ids", [])
+            cp = Checkpoint(
+                spec=RunSpec(
+                    scope=scope, message=body["message"], parent_run_id=parent_run_id,
+                    media_revision_id=requested_media[0] if len(requested_media) == 1 else None,
+                    image_artifact_id=image_artifact_id,
+                    search_request=dict(search_request, scope=scope) if search_request else None,
+                ),
+                usage=Usage(
+                    max_steps=max(0, int(os.getenv("CUTSIEVE_HARNESS_MAX_STEPS", "15"))),
+                    max_images=max(0, int(os.getenv("CUTSIEVE_HARNESS_MAX_IMAGES", "24"))),
+                ),
+            )
+            if parent_run_id:
+                parent = self.readable(db, workspace, parent_run_id)
+                if parent.project_id != project:
+                    raise missing()
+                cp.edit_project_id = parent.checkpoint.edit_project_id
+                cp.remember_media(parent.checkpoint.protected_media)
+            if edit_id := body.get("edit_project_id"):
+                one(db, owned(projects, workspace, edit_id).where(projects.c.project_id == project))
+                cp.edit_project_id = edit_id
+            self.sources.require_readable(db, workspace, cp.protected_media)
+
+            now, run_id = db_now(db), uid()
+            state = new_state(run_id, workspace, project, cp.usage, body.get("budget"))
+            if target := body.get("supersedes"):
+                previous = self.readable(db, workspace, target["run_id"], lock=True)
+                if previous.project_id != project:
+                    raise missing()
+                require_version(previous.state, target["expected_state_version"])
                 if previous.status in TERMINAL:
                     raise EditError(409, "TERMINAL_RUN", "只能替换仍在进行的任务")
-                before.update(
-                    status="SUPERSEDED", superseded_by_run_id=run_id, pending_job_ids=[], awaiting_input=None
-                )
-                self._update(db, previous, before, previous.checkpoint, "STATUS")
-            db.execute(
-                insert(runs).values(
-                    id=run_id,
-                    workspace_id=workspace,
-                    project_id=project,
-                    status="QUEUED",
-                    lease=0,
-                    fence=0,
-                    ready_at=now,
-                    deadline=now + state["budget_usage"]["limits"]["deadline_seconds"],
-                    state=state,
-                    checkpoint=cp,
-                )
-            )
-            self._event(db, state, "STATUS", dict(status="QUEUED", phase="PLAN"))
+                self._stop_pending(db, previous)
+                previous.state.update(status="SUPERSEDED", superseded_by_run_id=run_id, awaiting_input=None)
+                self.save(db, previous, ("STATUS", dict(status="SUPERSEDED", phase="AGENT")), release=True)
+
+            db.execute(insert(runs).values(
+                id=run_id, workspace_id=workspace, project_id=project, status="QUEUED", lease=0, fence=0,
+                ready_at=now, deadline=now + DEADLINE_SECONDS, state=state, checkpoint=cp,
+            ))
+            self._event(db, state, "STATUS", dict(status="QUEUED", phase="AGENT"))
             db.execute(update(runs).where(runs.c.id == run_id).values(state=state))
             return state
 
-        receipt_body = dict(body, search_request=search_request) if search_request is not None else body
-        if conversation is not None:
-            receipt_body = dict(body, parent_run_id=conversation.get("parent_run_id"))
-        kind = "chat-create" if conversation is not None else "wf-create"
-        receipt = self.edits.with_receipt(workspace, project, kind, receipt_body, save)[0]
+        request = dict(body, parent_run_id=parent_run_id, image_artifact_id=image_artifact_id,
+                       search_request=search_request)
+        receipt = self.edits.with_receipt(workspace, project, "wf-create", request, save)[0]
         self.get(workspace, receipt["run_id"])
         return receipt
 
     def readable(self, db, workspace, run_id, *, lock=False):
         query = owned(runs, workspace, run_id)
         row = one(db, query.with_for_update() if lock else query)
-        self.sources.require_readable(db, workspace, row.checkpoint.spec.scope.media_revision_ids)
+        self.sources.require_readable(db, workspace, row.checkpoint.protected_media)
         return row
 
     def get(self, workspace, run_id):
         with self.sessions() as db:
-            return self.readable(db, workspace, run_id).state
-
-    def harness_view(self, workspace, run_id, offset):
-        with self.sessions() as db:
             row = self.readable(db, workspace, run_id)
-            cp = row.checkpoint
-            attempt = cp.attempt
-            refs = list(cp.context.references.values())
-            return dict(
-                run_id=row.id,
-                harness_version=1,
-                turn=attempt.turn,
-                plan_generation=attempt.plan_generation,
-                repair_count=cp.repair.repair_count,
-                repair_limit=cp.repair.repair_limit,
-                index_generation_id=cp.spec.index_generation_id,
-                revision_id=attempt.revision_id,
-                shot_plan_id=attempt.shot_plan_id,
-                references=refs[offset : offset + 32],
-                reference_count=len(refs),
-                next_offset=offset + 32 if len(refs) > offset + 32 else None,
-                report_ids=[key for key in (attempt.preview_review_id, attempt.export_review_id) if key],
-            )
+            if "usage" in row.state:
+                return row.state
+            # Older completed runs still expose their recorded usage.
+            budget = row.state["budget_usage"]
+            counts = {
+                key: budget.get(key, 0) for key in ("model_calls", "tool_calls", "images", "input_tokens", "output_tokens")
+            }
+            usage = row.checkpoint.usage.model_copy(update=counts)
+            if budget.get("currency") == "CNY":
+                usage.estimated_cost_cny = (budget.get("committed_microunits") or 0) / 1_000_000
+            return dict(row.state, usage=usage.model_dump())
 
     def history(self, workspace, project, cursor, limit):
         def visible(row):
@@ -243,7 +207,7 @@ class WorkflowRepository:
                 return None
 
         page = self.edits.page(runs, workspace, visible, dict(project_id=project), cursor, limit)
-        page["items"] = [s for s in page["items"] if s is not None]
+        page["items"] = [state for state in page["items"] if state is not None]
         return page
 
     def control(self, workspace, run_id, action, body):
@@ -251,326 +215,181 @@ class WorkflowRepository:
 
         def save(db):
             row = self.readable(db, workspace, run_id, lock=True)
-            state, cp = deepcopy(row.state), row.checkpoint
-            deadline, kind = row.deadline, "STATUS"
+            state, cp = row.state, row.checkpoint
             if "expected_state_version" in body:
                 require_version(state, body["expected_state_version"])
-            if action == "cancel" and (row.status in TERMINAL or state["cancel_requested_at"]):
-                return state
-            if state["cancel_requested_at"]:
-                raise EditError(409, "CANCELLING", "任务正在取消")
-            if row.status in TERMINAL and not (
-                action == "resume" and row.status == "FAILED" and state["error"]["retryable"]
-            ):
-                raise EditError(409, "TERMINAL_RUN", "该任务已经结束")
             if action == "cancel":
-                state["cancel_requested_at"] = timestamp()
-                pending = db.scalar(
-                    select(model_requests.c.id)
-                    .where(model_requests.c.run_id == run_id, model_requests.c.status == "PENDING")
-                    .limit(1)
-                )
-                inspecting = any(job["status"] == "RUNNING" for job in cp.context.inspections.values())
-                if (pending or inspecting) and row.lease > db_now(db):
-                    self.trace(db, row, state, "cancel.requested")
-                else:
-                    self.cancelled(db, row, state)
+                if row.status not in TERMINAL:
+                    self._stop_pending(db, row)
+                    state.update(status="CANCELLED", cancel_requested_at=timestamp(), awaiting_input=None)
+                    self.save(db, row, ("RUN_CANCELLED", dict(status="CANCELLED")), release=True)
                 return state
-            elif action == "budget":
-                budget_change(state, body["new_limits"])
-                deadline = cp.spec.created + body["new_limits"]["deadline_seconds"]
-            else:
-                if row.status not in ("AWAITING_INPUT", "FAILED"):
-                    raise EditError(409, "INVALID_RUN_STATE", "此任务没有等待补充或重试")
-                awaiting = state["awaiting_input"]
-                if awaiting and awaiting["kind"] != "BUDGET":
-                    old = cp.attempt
-                    new = old.after_clarification(body["message"])
-                    if cp.spec.conversation is not None:
-                        new.clarifications.append(dict(question=awaiting["question"], reply=body["message"]))
-                        choices = old.conversation_candidates or []
-                        number = candidate_reference(body["message"]) if choices else None
-                        if number == 0 and len(choices) == 1:
-                            number = 1
-                        if number is not None:
-                            if not 1 <= number <= len(choices):
-                                raise EditError(422, "INVALID_CANDIDATE", "请选择清单中的一个候选编号")
-                            new.selected_candidate = choices[number - 1]
-                    if old.revision_id:
-                        current = one(db, owned(revisions, workspace, old.revision_id))
-                        new.base, new.base_id = current.number, current.id
-                    cp.attempt = new
-                    cp.spec = cp.spec.model_copy(update={"brief": None})
-                    state.update(phase="PLAN", pending_job_ids=[], result_artifact_id=None, evidence_ids=[])
-                state.update(status="QUEUED", error=None, awaiting_input=None)
-            payload = dict(phase=state["phase"], status=state["status"], action=action)
             if action == "budget":
-                payload.update(reason=body["reason"], limits=body["new_limits"])
-            self._update(db, row, state, cp, kind, payload, deadline=deadline)
+                # Legacy clients can store a display limit. Harness limits are fixed at creation.
+                state["budget_usage"]["limits"] = body["new_limits"]
+                state["budget_usage"]["currency"] = body["new_limits"]["currency"]
+                self.save(db, row, ("STATUS", dict(status=row.status, phase=state["phase"])))
+                return state
+            if row.status not in ("AWAITING_INPUT", "FAILED"):
+                raise EditError(409, "INVALID_RUN_STATE", "此任务没有等待补充或重试")
+            if row.status == "FAILED" and not state["error"]["retryable"]:
+                raise EditError(409, "TERMINAL_RUN", "该任务无法重试，请开始新一轮对话")
+            reply = body["message"].strip()
+            if not reply:
+                raise EditError(422, "INVALID_REQUEST", "请输入回复内容")
+            now = db_now(db)
+            notices = []
+            if pending := cp.pending_ask_tool_call:
+                cp.clarifications.append(Clarification(question=pending.question, reply=reply))
+                payload = self.tool_content(
+                    db, row, pending.tool_call_id, dict(ok=True, question=pending.question, reply=reply)
+                )
+                step = cp.finish_tool(pending.tool_call_id, payload, "Received clarification", True)
+                notices.append(("TOOL_FINISHED", step))
+                cp.pending_ask_tool_call = None
+                deadline = row.deadline + (now - cp.paused_at)
+            else:
+                cp.retry_replies.append(reply)
+                if row.status == "AWAITING_INPUT" and (question := (state["awaiting_input"] or {}).get("question")):
+                    cp.clarifications.append(Clarification(question=question, reply=reply))
+                deadline = now + DEADLINE_SECONDS
+            cp.paused_at = None
+            cp.lease_failures = 0
+            state.update(status="QUEUED", phase="AGENT", error=None, awaiting_input=None)
+            self.save(db, row, *notices, ("STATUS", dict(status="QUEUED", phase="AGENT")), release=True, deadline=deadline)
             return state
 
         return self.edits.with_receipt(workspace, run_id, "wf-" + action, body, save)[0]
 
-    def cancelled(self, db, row, state):
-        state.update(status="CANCELLED", awaiting_input=None, pending_job_ids=[])
-        self._update(db, row, state, row.checkpoint, "CANCELLED")
+    def _stop_pending(self, db, row):
+        cp = row.checkpoint
+        if pending := cp.pending_render_tool_call:
+            key = stable_id(row.id, "cancel:" + pending.render_job_id)
+            self.edits.cancel(row.workspace_id, pending.render_job_id, dict(idempotency_key=key), session=db)
+        cp.pending_render_tool_call = None
+        cp.pending_ask_tool_call = None
+        for step in cp.tool_steps:
+            if step.status == "RUNNING":
+                step.status, step.ok = "CANCELLED", False
+        row.state["pending_job_ids"] = []
 
-    def stopped(self, claim):
-        with self.edits.write() as db:
-            row = db.execute(select(runs).where(runs.c.id == claim.id).with_for_update()).one()
-            if row.fence == claim.fence and row.state["cancel_requested_at"] and row.status not in TERMINAL:
-                self.cancelled(db, row, deepcopy(row.state))
+    def fail(self, db, row, code, message, retryable=False):
+        if not retryable:
+            self._stop_pending(db, row)
+        error = public_error(code, message, retryable)
+        row.state.update(status="FAILED", error=error, awaiting_input=None)
+        self.save(db, row, ("RUN_FAILED", dict(status="FAILED", error=error)), release=True)
 
     def claim(self, worker, lease_seconds=60):
         with self.edits.write() as db:
             now = db_now(db)
-            ready = and_(runs.c.status.in_(RUNNABLE), runs.c.lease <= now, runs.c.ready_at <= now)
             row = db.execute(
-                select(runs)
-                .where(ready)
-                .order_by(runs.c.ready_at, runs.c.id)
-                .limit(1)
-                .with_for_update(skip_locked=True)
+                select(runs).where(runs.c.status.in_(RUNNABLE), runs.c.lease <= now, runs.c.ready_at <= now)
+                .order_by(runs.c.ready_at, runs.c.id).limit(1).with_for_update(skip_locked=True)
             ).first()
-            if not row:
+            if row is None:
                 return None
             if row.state["cancel_requested_at"]:
-                self.cancelled(db, row, deepcopy(row.state))
+                self._stop_pending(db, row)
+                row.state.update(status="CANCELLED", awaiting_input=None)
+                self.save(db, row, ("RUN_CANCELLED", dict(status="CANCELLED")), release=True)
                 return None
             try:
-                self.sources.require_readable(
-                    db, row.workspace_id, row.checkpoint.spec.scope.media_revision_ids
-                )
+                self.sources.require_readable(db, row.workspace_id, row.checkpoint.protected_media)
             except HTTPException:
-                state = deepcopy(row.state)
-                state.update(
-                    status="FAILED",
-                    pending_job_ids=[],
-                    error=public_error("SOURCE_REVOKED", "源素材已不可用"),
-                )
-                self._update(db, row, state, row.checkpoint, "FAILED")
+                self.fail(db, row, "SOURCE_REVOKED", "源素材已不可用")
                 return None
             if row.deadline <= now:
-                state = deepcopy(row.state)
-                state.update(status="FAILED", error=public_error("DEADLINE_EXCEEDED", "任务已到达时间上限"))
-                self._update(db, row, state, row.checkpoint, "FAILED")
+                self.fail(db, row, "DEADLINE_EXCEEDED", "任务已到达时间上限")
                 return None
-            checkpoint = row.checkpoint
-            checkpoint.attempt.lease_owner = worker
+            cp = row.checkpoint
             if row.lease:
-                checkpoint.attempt.lease_failures += 1
-            if checkpoint.attempt.lease_failures > 3:
-                state = deepcopy(row.state)
-                state.update(
-                    status="FAILED", error=public_error("LEASE_RETRY_EXHAUSTED", "连续三次接管后仍未完成")
-                )
-                self._update(db, row, state, checkpoint, "FAILED")
+                cp.lease_failures += 1
+            if cp.lease_failures > 3:
+                self.fail(db, row, "LEASE_RETRY_EXHAUSTED", "连续接管后任务仍未完成", True)
                 return None
-            fence = row.fence + 1
-            state = deepcopy(row.state)
-            if row.status == "QUEUED":
-                state["status"] = "RUNNING"
-                state["state_version"] += 1
-                self._event(db, state, "STATUS", dict(status="RUNNING", phase=state["phase"]))
-            expiry = min(row.deadline, now + lease_seconds)
-            db.execute(
-                update(runs)
-                .where(runs.c.id == row.id)
-                .values(lease=expiry, fence=fence, status=state["status"], state=state, checkpoint=checkpoint)
-            )
+            if row.status == "QUEUED" or row.state["phase"] != "AGENT":
+                row.state.update(status="RUNNING", phase="AGENT")
+                self._event(db, row.state, "STATUS", dict(status="RUNNING", phase="AGENT"))
+                row.state["state_version"] += 1
+            db.execute(update(runs).where(runs.c.id == row.id).values(
+                lease=min(row.deadline, now + lease_seconds), fence=row.fence + 1,
+                status=row.state["status"], state=row.state, checkpoint=cp,
+            ))
             return one(db, select(runs).where(runs.c.id == row.id))
 
-    def guard(self, db, claim):
-        row = db.execute(select(runs).where(runs.c.id == claim.id).with_for_update()).first()
-        if (
-            not row
-            or row.fence != claim.fence
-            or row.status not in RUNNABLE
-            or row.state["cancel_requested_at"]
-            or min(row.lease, row.deadline) <= db_now(db)
-        ):
+    def guard(self, db, claim, *, lock=True):
+        query = select(runs).where(runs.c.id == claim.id)
+        row = one(db, query.with_for_update() if lock else query)
+        now = db_now(db)
+        if row.fence != claim.fence or row.status not in RUNNABLE or row.lease <= now or row.deadline <= now:
             raise StaleLease()
         try:
-            self.sources.require_readable(db, row.workspace_id, row.checkpoint.spec.scope.media_revision_ids)
+            self.sources.require_readable(db, row.workspace_id, row.checkpoint.protected_media)
         except HTTPException as exc:
             raise StaleLease() from exc
         return row
+
+    @contextmanager
+    def change(self, claim):
+        with self.edits.write() as db:
+            yield db, self.guard(db, claim)
 
     def remaining(self, claim):
         with self.sessions() as db:
             return max(0, claim.deadline - db_now(db))
 
     def renew(self, claim):
+        with self.change(claim) as (db, row):
+            db.execute(update(runs).where(runs.c.id == row.id).values(lease=min(row.deadline, db_now(db) + 60)))
+
+    def stopped(self, claim):
         with self.edits.write() as db:
-            row = self.guard(db, claim)
-            expiry = min(row.deadline, db_now(db) + 60)
-            db.execute(update(runs).where(runs.c.id == row.id).values(lease=expiry))
+            row = one(db, select(runs).where(runs.c.id == claim.id).with_for_update())
+            if row.fence == claim.fence and row.status in RUNNABLE and row.lease:
+                if row.deadline <= db_now(db):
+                    self.fail(db, row, "DEADLINE_EXCEEDED", "任务已到达时间上限")
+                else:
+                    try:
+                        self.sources.require_readable(db, row.workspace_id, row.checkpoint.protected_media)
+                    except HTTPException:
+                        self.fail(db, row, "SOURCE_REVOKED", "源素材已不可用")
 
-    def writer_guard(self, db, claim, phase):
-        row = self.guard(db, claim)
-        if phase not in ("COMMIT", "RENDER") or row.state["phase"] != phase:
-            raise EditError(403, "WRITER_REQUIRED", "当前阶段没有时间线或渲染写权限")
+    def defer_render(self, db, row):
+        db.execute(update(runs).where(runs.c.id == row.id).values(lease=0, ready_at=db_now(db) + 1))
 
-    def output(self, db, row, label, body, kind="REPORT"):
-        key = stable_id(row.id, generation_key(row.checkpoint, f"{label}:{row.checkpoint.attempt.turn}"))
-        existing = db.execute(select(documents.c.body).where(documents.c.id == key)).first()
-        if existing is None:
-            db.execute(insert(documents).values(id=key, run_id=row.id, kind=kind, body=body))
-        elif digest(existing.body) != digest(body):
-            raise EditError(409, "DOCUMENT_INPUT_CONFLICT", "当前代次已经保存了此阶段的结果")
+    def tool_content(self, db, row, call_id, body):
+        content = encode_tool_text(body)
+        if len(content) > TOOL_TEXT_LIMIT:
+            key = self.output(db, row, "tool:" + call_id, body, "TOOL_RESULT")
+            content = encode_tool_text(compact_tool_body(body, key))
+        return content
+
+    def complete(self, db, row, result):
+        key = self.output(db, row, "result", result, "QUERY_RESULT")
+        row.state.update(status="SUCCEEDED", phase="DONE", result_artifact_id=key, pending_job_ids=[])
+        self.save(db, row, ("RUN_COMPLETED", dict(status="SUCCEEDED", result_artifact_id=key)), release=True)
+
+    @staticmethod
+    def output(db, row, label, body, kind):
+        key = stable_id(row.id, "agent:" + label)
+        db.execute(insert(documents).values(id=key, run_id=row.id, kind=kind, body=body))
         return key
 
-    def checkpoint_inspection(self, db, row, checkpoint, job):
-        db.execute(update(runs).where(runs.c.id == row.id).values(checkpoint=checkpoint))
-        self.trace(db, row, deepcopy(row.state), "inspection.started", job_id=job["job_id"])
-
-    def pin_skill(self, claim, slot, load):
-        with self.edits.write() as db:
-            row = self.guard(db, claim)
-            cp = row.checkpoint
-            skills = cp.attempt.skill_snapshots
-            if slot not in skills:
-                from cutsieve.application.workflow_skills import skill_identity
-
-                skills[slot] = load()
-                db.execute(update(runs).where(runs.c.id == row.id).values(checkpoint=cp))
-                self.trace(db, row, deepcopy(row.state), "skill.loaded", skill=skill_identity(skills[slot]))
-            snapshot = skills[slot]
-        # The current stage may compile a shot plan before it takes another claim.
-        claim.checkpoint.attempt.skill_snapshots[slot] = snapshot
-        return snapshot
-
-    def record_activity(self, claim, activity, **metadata):
-        with self.edits.write() as db:
-            row = self.guard(db, claim)
-            self.trace(db, row, deepcopy(row.state), activity, **metadata)
-
-    def advance(self, claim, *, attempt: PlanAttempt | None = None, spec: RunSpec | None = None,
-                references=None, inspection=None, processing_job_ids=(), repair: ClipRepair | None = None,
-                state=None, docs=None, event="PROGRESS", payload=None, sleep=False, inspection_finished=None):
-        with self.edits.write() as db:
-            row = self.guard(db, claim)
-            updates = state or {}
-            state, cp = deepcopy(row.state), row.checkpoint
-            if sleep:
-                db.execute(update(runs).where(runs.c.id == row.id).values(lease=0, ready_at=db_now(db) + 1))
-                return
-            if spec is not None:
-                cp.spec = spec
-            if attempt is not None:
-                # The claim can predate a skill pin. Apply only fields produced by this stage.
-                for name in attempt.model_fields_set:
-                    setattr(cp.attempt, name, getattr(attempt, name))
-            if references:
-                cp.context.references.update(references)
-            if inspection:
-                cp.context.inspections[inspection["job_id"]] = inspection
-            if processing_job_ids:
-                cp.context.processing_job_ids = list(dict.fromkeys([*cp.context.processing_job_ids, *processing_job_ids]))
-            if inspection_finished:
-                emit(db, uid(), row.workspace_id, inspection_finished, "inspection.finished")
-            cp.attempt.lease_failures = 0
-            state.update(updates)
-            if updates.get("evidence_ids"):
-                cp.context.references = remember_evidence(
-                    self, row, cp.context.references, state["evidence_ids"], row.state["phase"], session=db
-                )
-            for label, body in (docs or {}).items():
-                key = self.output(db, row, label, body, "QUERY_RESULT" if label == "result" else "REPORT")
-                if label == "result":
-                    state["result_artifact_id"] = key
-                else:
-                    setattr(cp.attempt, label + "_id", key)
-            remember_outputs(cp, row.state["phase"])
-            if repair is not None:
-                old = cp.attempt
-                cp.repair.lineage.append(dict(
-                    plan_generation=old.plan_generation, review_report_id=old.preview_review_id,
-                    shot_plan_id=old.shot_plan_id, proposal_id=old.proposal_id,
-                    revision_id=old.revision_id, preview_artifact_id=old.preview_artifact_id,
-                ))
-                cp.repair.signatures.append(repair.signature)
-                cp.repair.rejected_candidates = repair.rejected_candidates
-                cp.repair.repair_count += 1
-                cp.attempt = repair.attempt
-                state.update(result_artifact_id=None, pending_job_ids=[])
-            payload = dict(
-                phase=state["phase"],
-                status=state["status"],
-                **workflow_version(cp),
-                **(payload or {}),
-            )
-            self._update(db, row, state, cp, event, payload)
-
-    def invoke(self, claim, key, name, arguments, execute):
-        """Persist intent before execution. Effect adapters reuse this stable key on recovery."""
-        predicate = and_(calls.c.run_id == claim.id, calls.c.call_key == key)
-        with self.edits.write() as db:
-            row = self.guard(db, claim)
-            old = db.execute(select(calls).where(predicate)).first()
-            if old and (old.name != name or old.input_digest != digest(arguments)):
-                raise EditError(409, "TOOL_ARGUMENT_CONFLICT", "工具重试参数与已登记请求不符")
-            if old and old.response is not None:
-                self.trace(
-                    db,
-                    row,
-                    deepcopy(row.state),
-                    "tool.replayed",
-                    tool=name,
-                    call_key=key,
-                    attempt=old.attempts,
-                    reason="stored_tool_result",
-                )
-                return old.response
-            state = deepcopy(row.state)
-            usage = state["budget_usage"]
-            if usage["tool_calls"] >= usage["limits"]["max_tool_calls"]:
-                raise NeedsInput("工具调用次数已达到上限。请调整预算后继续。", kind="BUDGET")
-            usage["tool_calls"] += 1
-            attempt = old.attempts + 1 if old else 1
-            self.trace(db, row, state, "tool.started", tool=name, call_key=key, attempt=attempt)
-            if old:
-                db.execute(update(calls).where(predicate).values(attempts=old.attempts + 1))
-            else:
-                db.execute(
-                    insert(calls).values(
-                        run_id=row.id, call_key=key, name=name, attempts=1, input_digest=digest(arguments)
-                    )
-                )
-        start = time.monotonic()
-        result = execute()
-        with self.edits.write() as db:
-            row = self.guard(db, claim)
-            db.execute(update(calls).where(predicate).values(response=result))
-            metadata = {
-                k: result[k] for k in ("render_job_id", "revision_id", "edit_project_id") if k in result
-            }
-            if "replayed" in result:
-                metadata["receipt_replayed"] = result["replayed"]
-            self.trace(
-                db,
-                row,
-                deepcopy(row.state),
-                "tool.finished",
-                tool=name,
-                call_key=key,
-                attempt=attempt,
-                latency_ms=int((time.monotonic() - start) * 1000),
-                **metadata,
-            )
-        return result
+    def render_job(self, db, row, job_id):
+        if job_id not in row.checkpoint.render_job_ids:
+            raise missing()
+        return job_view(one(db, owned(jobs, row.workspace_id, job_id)))
 
     def event_cursor(self, workspace, run_id, cursor):
         with self.sessions() as db:
             self.readable(db, workspace, run_id)
             if not cursor:
                 return 0
-            n = db.execute(
-                select(events.c.seq).where(events.c.run_id == run_id, events.c.id == cursor)
-            ).scalar()
-        if n is None:
+            index = db.scalar(select(events.c.seq).where(events.c.run_id == run_id, events.c.id == cursor))
+        if index is None:
             raise EditError(409, "CURSOR_EXPIRED", "事件游标已失效，请重新读取任务快照")
-        return n
+        return index
 
     def page(self, workspace, run_id, cursor, limit):
         index = int(cursor) if cursor and cursor.isascii() and cursor.isdigit() and len(cursor) < 17 else -1
@@ -591,10 +410,9 @@ class WorkflowRepository:
             with self.sessions() as db:
                 return self.document(workspace, key, session=db)
         row = session.execute(
-            select(documents, runs.c.checkpoint)
-            .join(runs, documents.c.run_id == runs.c.id)
+            select(documents, runs.c.checkpoint).join(runs, documents.c.run_id == runs.c.id)
             .where(runs.c.workspace_id == workspace, documents.c.id == key)
         ).first()
         if row:
-            self.sources.require_readable(session, workspace, row.checkpoint.spec.scope.media_revision_ids)
+            self.sources.require_readable(session, workspace, row.checkpoint.protected_media)
         return row

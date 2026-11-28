@@ -19,40 +19,39 @@ test('upload, trim two ranges, preview, reorder and export a pinned version', { 
   page.setDefaultTimeout(15000)
   const button = name => page.getByRole('button', { name, exact: true })
   const waitVersion = version => page.waitForFunction(label =>
-    Array.from(document.querySelectorAll('select')).some(s => s.selectedOptions[0]?.textContent.trim() === label), version)
-  const verifyVideo = async (label, duration) => {
-    const video = page.getByLabel(label, { exact: true })
+    document.querySelector('select[aria-label="时间线版本"]')?.selectedOptions[0]?.textContent.trim() === label, version)
+  const verifyVideo = async duration => {
+    const video = page.getByLabel('监视器播放', { exact: true })
     await video.waitFor()
-    await page.waitForFunction(({ label, duration }) => {
-      const node = Array.from(document.querySelectorAll('video')).find(v => v.getAttribute('aria-label') === label)
+    await page.waitForFunction(duration => {
+      const node = document.querySelector('video[aria-label="监视器播放"]')
       return node && node.readyState >= 1 && Math.abs(node.duration - duration) < .2
-    }, { label, duration })
-    await video.evaluate(node => { node.muted = true; return node.play() })
-    await page.waitForFunction(label => Array.from(document.querySelectorAll('video')).some(
-      node => node.getAttribute('aria-label') === label && node.currentTime > .1), label)
+    }, duration)
+    assert.equal(await button('成片预览').getAttribute('aria-pressed'), 'true')
+    await video.evaluate(node => { node.muted = true; node.currentTime = 0; return node.play() })
+    await page.waitForFunction(() => document.querySelector('video[aria-label="监视器播放"]')?.currentTime > .1)
     await video.evaluate(node => node.pause())
   }
-  const completed = profile => page.getByText(profile + ' · 已完成', { exact: true }).waitFor({ timeout: 60000 })
+  const completed = profile => page.locator('.edit-job-list').getByText(profile + ' · 已完成', { exact: false }).waitFor({ timeout: 60000 })
   const output = process.env.CUTSIEVE_EDIT_EVIDENCE
   let stage = '打开本地工作区'
   try {
     await page.goto(base)
-    await page.getByText('本地工作区', { exact: true }).waitFor()
+    await page.getByRole('heading', { name: '智能剪辑助手' }).waitFor()
+    assert.equal(await page.locator('.project-tabs').count(), 0)
     stage = '创建项目并上传'
+    await button('+ 新建项目').click()
     await page.getByLabel('新项目名称').fill('样片验收')
     await button('创建项目').click()
-    await button('素材处理').click()
     const complete = page.waitForResponse(r => r.url().includes('/complete') && r.request().method() === 'POST')
     await page.getByLabel('添加视频').setInputFiles(file)
     const uploaded = await complete
     assert.ok(uploaded.ok(), 'Upload completion HTTP ' + uploaded.status())
-    await button('时间线').click()
-    await page.getByLabel('新方案名称').fill('两段精剪')
-    await button('新建剪辑').click()
+    await page.getByLabel('监视器播放').waitFor()
     const addRange = async (from, to, count) => {
       await page.getByLabel('入点（秒）').fill(String(from))
       await page.getByLabel('出点（秒）').fill(String(to))
-      await button('添加到时间线').click()
+      await button('加入时间线').click()
       await page.locator('.edit-clips li').nth(count - 1).waitFor()
     }
     stage = '选择时间段'
@@ -61,30 +60,31 @@ test('upload, trim two ranges, preview, reorder and export a pinned version', { 
     stage = '预览'
     await button('生成预览').click()
     await completed('预览')
-    await button('打开成片').click()
-    await verifyVideo('剪辑成片', 3.5)
-    await button('查看源片对应').click()
-    const firstSource = page.locator('.edit-results ol button').first()
-    const time = (await firstSource.innerText()).match(/原片 (\d+):([\d.]+)/)
+    await button('播放预览').click()
+    await verifyVideo(3.5)
+    await button('源片映射').click()
+    const firstSource = page.locator('.mapping-list button').first()
+    const time = (await firstSource.innerText()).match(/原片 (\d+):([\d.]+)\s+–\s+(\d+):([\d.]+)/)
     assert.ok(time, 'Compiled source start must be displayed')
     await firstSource.click()
-    await page.waitForFunction(expected => {
-      const video = document.querySelector('video[aria-label="证据原片回看"]')
-      return video?.readyState >= 1 && Math.abs(video.currentTime - expected) <= .035
-    }, Number(time[1]) * 60 + Number(time[2]))
+    assert.equal(await button('原片').getAttribute('aria-pressed'), 'true')
+    await page.waitForFunction(({ start, end }) => {
+      const video = document.querySelector('video[aria-label="监视器播放"]')
+      return video?.readyState >= 2 && video.currentTime >= start - .04 && video.currentTime <= end + .04
+    }, { start: Number(time[1]) * 60 + Number(time[2]), end: Number(time[3]) * 60 + Number(time[4]) })
     stage = '调整顺序'
     await page.locator('.edit-clips li').nth(1).getByRole('button', { name: '上移' }).click()
     await waitVersion('V3（当前）')
-    assert.match(await page.locator('.edit-clips li').first().innerText(), /2 – 4 秒/)
+    assert.match(await page.locator('.edit-clips li').first().innerText(), /0:02 – 0:04/)
     stage = '刷新后导出'
     await page.reload()
     await waitVersion('V3（当前）')
     assert.equal(await page.locator('.edit-job-list li').count(), 0)
     await button('导出视频').click()
     await completed('导出')
-    await button('打开成片').click()
-    await verifyVideo('剪辑成片', 3.5)
-    const link = page.getByRole('link', { name: '下载 MP4' })
+    await button('播放成片').click()
+    await verifyVideo(3.5)
+    const link = page.locator('.render-bar').getByRole('link', { name: '下载 MP4' })
     const [download] = await Promise.all([page.waitForEvent('download'), link.click()])
     const mp4 = await open(await download.path(), 'r')
     try {
@@ -93,14 +93,24 @@ test('upload, trim two ranges, preview, reorder and export a pinned version', { 
     } finally { await mp4.close() }
     if (output) {
       await mkdir(output, { recursive: true })
-      await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }))
       await page.screenshot({ path: path.join(output, 'edit-export.png'), fullPage: true })
-      await page.setViewportSize({ width: 390, height: 844 })
-      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Mobile horizontal overflow')
-      await page.screenshot({ path: path.join(output, 'edit-mobile.png'), fullPage: true })
     }
+    await page.setViewportSize({ width: 1024, height: 768 })
+    const desktop = await page.locator('.studio-grid').evaluate(grid => {
+      const [left, right] = Array.from(grid.children, node => node.getBoundingClientRect())
+      return { sameRow: left.top === right.top, ratio: left.width / (left.width + right.width) }
+    })
+    assert.equal(desktop.sameRow, true)
+    assert.ok(Math.abs(desktop.ratio - .6) < .01, 'Desktop studio should split 60/40')
+    await page.setViewportSize({ width: 390, height: 844 })
+    assert.ok(await page.evaluate(() => {
+      const timeline = document.querySelector('.timeline-pane').getBoundingClientRect()
+      const assistant = document.querySelector('.agent-pane').getBoundingClientRect()
+      return document.documentElement.scrollWidth === document.documentElement.clientWidth && timeline.bottom <= assistant.top
+    }), 'Mobile studio should stack with zero horizontal overflow')
+    if (output) await page.screenshot({ path: path.join(output, 'edit-mobile.png'), fullPage: true })
     stage = '替换、移除并恢复旧版'
-    await page.locator('.edit-clips li').first().getByRole('button', { name: '替换区间' }).click()
+    await page.locator('.edit-clips li').first().getByRole('button', { name: '替换' }).click()
     await page.getByLabel('出点（秒）').fill('3.5')
     await button('保存替换').click()
     await waitVersion('V4（当前）')
@@ -111,7 +121,7 @@ test('upload, trim two ranges, preview, reorder and export a pinned version', { 
     await completed('预览')
     await button('恢复为新版本').click()
     await waitVersion('V6（当前）')
-    assert.match(await page.locator('.edit-clips li').first().innerText(), /0.25 – 1.75 秒/)
+    assert.match(await page.locator('.edit-clips li').first().innerText(), /0:00.25 – 0:01.75/)
     t.diagnostic('Real preview and export played; output duration 3.5 s. Page ' + page.url())
   } catch (cause) {
     const errors = await page.getByRole('alert').allTextContents()

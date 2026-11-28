@@ -51,16 +51,19 @@ class SourceReader:
     def frame_pts(self, requested):
         return _boundary(self.path, self.probe, requested, end=False, ffprobe=self.ffprobe, stopped=self.stopped)
 
-    def save_frame(self, pts, output):
+    def save_frame(self, pts, output, *, max_width=None):
         actual = round((pts * self.raw_timebase - self.origin) * US)
         seek = max(0, (actual - 2 * US) / US)
+        filters = f"select='eq(pts,{pts})'"
+        if max_width is not None:
+            filters += f",scale='min({max_width},iw)':-2"
         self.ff(
             ["-copyts", "-ss", str(seek), "-noaccurate_seek"],
             [
                 "-map",
                 f"0:{self.probe['video_index']}",
                 "-vf",
-                f"select='eq(pts,{pts})'",
+                filters,
                 "-vsync",
                 "0",
                 "-frames:v",

@@ -13,7 +13,7 @@ from cutsieve.infrastructure.persistence.edit_tables import jobs
 from cutsieve.infrastructure.persistence.outbox_tables import outbox
 from cutsieve.infrastructure.persistence.processing_tables import runs as processing
 from cutsieve.infrastructure.persistence.workflow_tables import model_requests, runs as workflows
-from cutsieve.infrastructure.providers.config import configured_model, model_supports_vision, model_tool_mode
+from cutsieve.infrastructure.providers.config import configured_model, model_supports_vision
 
 
 def capabilities(env):
@@ -27,12 +27,12 @@ def capabilities(env):
         "FFmpeg": env.get("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=env.get("CUTSIEVE_FFMPEG_DIR")),
     }
     return dict(
-        general_model=config.model if config else "deepseek-flash",
+        general_model=config.model if config else "deepseek-v4-flash",
         resolved_model_version=config.resolved_model if config else "unverified",
         checked_at=datetime.now(timezone.utc).isoformat(),
         text=configured,
         vision=configured and model_supports_vision(env),
-        native_tools=configured and model_tool_mode(env) == "native",
+        native_tools=configured and env.get("CUTSIEVE_WORKFLOW_LIVE_MODEL", "1") != "0",
         structured_json=configured,
         dedicated_services=[
             dict(name=name, configured=bool(value), verified=False, version=None)

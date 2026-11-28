@@ -11,31 +11,31 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from cutsieve.application.conversation_runs import conversation
-from cutsieve.application.edit_timeline import EditError
-from cutsieve.application.workflow_state import DEFAULT_BUDGET, TERMINAL
-from cutsieve.application.workflow_tools import job_status
+from cutsieve.application.edit_timeline import EditError, missing
+from cutsieve.application.workflow_state import TERMINAL
 from cutsieve.infrastructure.persistence.workflow_repository import WorkflowRepository
 from cutsieve.infrastructure.persistence.workflow_worker import WorkflowWorker
 from cutsieve.infrastructure.persistence.work_outbox import WorkOutbox
 from .edit_sources import signature
-from .schemas import Budget, BudgetAdjust, CancelRequest, IdempotencyKey, SearchWorkflow, WorkflowCreate, WorkflowResume
+from .schemas import BudgetAdjust, CancelRequest, IdempotencyKey, SearchWorkflow, WorkflowCreate, WorkflowResume
 
 
 class ChatTurn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=12000)]
-    media_revision_id: UUID
+    media_revision_id: UUID | None = None
+    edit_project_id: UUID | None = None
+    image_artifact_id: UUID | None = None
     parent_run_id: UUID | None = None
     idempotency_key: IdempotencyKey
-    budget: Budget | None = None
 
 
-def install_workflow_routes(app, workspace_user):
+def install_workflow_routes(app, workspace_user, *, transport=None):
     sources = app.state.edit_sources
     edits = app.state.edit_worker.repo
     repo = WorkflowRepository(edits)
     worker = app.state.workflow_worker = WorkflowWorker(
-        repo, app, partial(signature, sources.root, "workflow-result")
+        repo, app, partial(signature, sources.root, "workflow-result"), transport=transport
     )
     app.state.work_outbox = WorkOutbox(edits)
 
@@ -71,23 +71,22 @@ def install_workflow_routes(app, workspace_user):
     @router.post("/projects/{project_id}/conversation-runs", status_code=202)
     def start_conversation(project_id: str, turn: ChatTurn, scope=Depends(workspace)):
         require_enabled()
+        image = str(turn.image_artifact_id) if turn.image_artifact_id else None
+        if image:
+            resource = app.state.evidence_search.files.get(scope, image, project=project_id)
+            if not resource or resource.kind != "IMAGE_QUERY":
+                raise missing()
         body = dict(
-            intent="AUTO",
             message=turn.message,
             idempotency_key=turn.idempotency_key,
-            scope=dict(project_id=project_id, media_revision_ids=[str(turn.media_revision_id)]),
+            scope=dict(project_id=project_id, media_revision_ids=[str(turn.media_revision_id)] if turn.media_revision_id else []),
         )
-        if turn.budget is not None:
-            body["budget"] = turn.budget
-        elif limit := os.getenv("CUTSIEVE_CHAT_MAX_COST_MICROUNITS"):
-            amount = int(limit)
-            if amount < 0:
-                raise EditError(422, "INVALID_REQUEST", "费用上限需要为非负整数")
-            body["budget"] = dict(DEFAULT_BUDGET, max_cost_microunits=amount)
-        context = dict(
+        if turn.edit_project_id:
+            body["edit_project_id"] = str(turn.edit_project_id)
+        return repo.create(
+            scope, body, image_artifact_id=image,
             parent_run_id=str(turn.parent_run_id) if turn.parent_run_id else None,
         )
-        return repo.create(scope, body, conversation=context)
 
     @router.get("/workflow-runs/{run_id}/conversation")
     def read_conversation(run_id: str, scope=Depends(workspace)):
@@ -112,7 +111,7 @@ def install_workflow_routes(app, workspace_user):
             message=text or "核查查询截图",
             idempotency_key=body["idempotency_key"],
         )
-        return repo.create(scope, run, search_request=query)
+        return repo.create(scope, run, search_request=query, image_artifact_id=image)
 
     @router.get("/projects/{project_id}/workflow-runs")
     def history(
@@ -130,7 +129,10 @@ def install_workflow_routes(app, workspace_user):
 
     @router.get("/workflow-runs/{run_id}/harness")
     def harness_view(run_id: str, offset: int = Query(0, ge=0), scope=Depends(workspace)):
-        return repo.harness_view(scope, run_id, offset)
+        with repo.sessions() as db:
+            cp = repo.readable(db, scope, run_id).checkpoint
+            return dict(run_id=run_id, harness_version=2, revision_id=cp.revision_id,
+                        tool_steps=[step.model_dump() for step in cp.tool_steps[offset:offset + 32]])
 
     @router.post("/workflow-runs/{run_id}/resume", status_code=202)
     def resume(run_id: str, body: WorkflowResume, scope=Depends(workspace)):
@@ -141,22 +143,29 @@ def install_workflow_routes(app, workspace_user):
         return repo.control(scope, run_id, "budget", body)
 
     @router.post("/workflow-runs/{run_id}/cancel", status_code=202)
-    def cancel(run_id: str, body: CancelRequest, scope=Depends(workspace)):
-        return repo.control(scope, run_id, "cancel", body)
+    def cancel(run_id: str, body: CancelRequest | None = None, scope=Depends(workspace)):
+        return repo.control(scope, run_id, "cancel", body or {"idempotency_key": "workflow-cancel"})
 
     @router.get("/workflow-runs/{run_id}/result")
     def result(run_id: str, scope=Depends(workspace)):
-        state = repo.get(scope, run_id)
-        key = state["result_artifact_id"]
-        if not key:
-            raise EditError(409, "RESULT_PENDING", "任务尚无最终产物")
-        return repo.document(scope, key).body
+        with repo.sessions() as db:
+            row = repo.readable(db, scope, run_id)
+            if not (key := row.state["result_artifact_id"]):
+                raise EditError(409, "RESULT_PENDING", "任务尚无最终产物")
+            body = repo.document(scope, key, session=db).body
+            return row.checkpoint.result(body.get("answer")) | body
 
     @router.get("/workflow-runs/{run_id}/jobs/{job_id}")
     def child_job(run_id: str, job_id: str, scope=Depends(workspace)):
         with repo.sessions() as db:
             row = repo.readable(db, scope, run_id)
-            return job_status(repo, app.state.evidence_search, row, job_id)
+            job = repo.render_job(db, row, job_id)
+            return dict(
+                job_id=job_id, kind="RENDER", status=job["status"],
+                terminal=job["status"] in ("SUCCEEDED", "FAILED", "CANCELLED"),
+                cancel_requested_at=job["cancel_requested_at"], error=job["error"],
+                result_artifact_ids=[job["artifact_id"]] if job["artifact_id"] else [],
+            )
 
     @router.get("/workflow-artifacts/{key}/content", name="workflow_artifact_bytes")
     def document_content(key: str, workspace: str, expires: int, token: str):

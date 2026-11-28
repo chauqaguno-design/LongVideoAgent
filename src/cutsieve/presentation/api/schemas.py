@@ -7,9 +7,8 @@ from typing import Annotated, Literal, NotRequired
 from pydantic import Field
 
 from cutsieve.application.spec_contracts import (
-    Message, Nonnegative, RequestBody, ResourceId, Scope, SearchRequest, TimeUs,
+    Message, Nonnegative, OutputProfile, RequestBody, ResourceId, Scope, SearchRequest, TimeUs,
 )
-from cutsieve.application.workflow_checkpoint import OutputProfile
 
 
 Positive = Annotated[int, Field(ge=1)]

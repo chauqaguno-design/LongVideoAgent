@@ -1,1 +1,0 @@
-Extract the user’s hard constraints separately from preferences. Keep verified sources and mandatory evidence in each interval. Propose only in-scope material. If duration, ordering, audio or exclusions cannot be satisfied, request clarification.

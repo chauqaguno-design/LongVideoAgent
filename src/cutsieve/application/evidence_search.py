@@ -15,7 +15,7 @@ from cutsieve.application.rank_fusion import RankedCandidate, reciprocal_rank_fu
 from cutsieve.application.media_sampling import segment_bounds
 from cutsieve.application.sparse_retrieval import normalize_text
 from cutsieve.application.sparse_retrieval import BM25Retriever
-from cutsieve.application.workflow_state import NeedsInput
+from cutsieve.application.edit_timeline import EditError
 from cutsieve.infrastructure.persistence.edit_repository import EditRepository
 from cutsieve.infrastructure.search_artifacts import SearchArtifacts
 from cutsieve.infrastructure.search_features import (
@@ -116,8 +116,8 @@ def exclude_subtitles(hits, words, rows, coverage):
             keep.append(hit)
     if hits and not keep:
         if has_gap:
-            raise NeedsInput("部分候选区间缺少可完整核对的内嵌字幕，无法确认排除条件。请提供字幕或指定区间。")
-        raise NeedsInput("匹配的片段均与要求排除的字幕重叠，请修改包含或排除条件。", kind="CONSTRAINT_CONFLICT")
+            raise EditError(422, "SUBTITLE_COVERAGE_REQUIRED", "部分候选区间缺少可完整核对的内嵌字幕，无法确认排除条件。")
+        raise EditError(422, "SUBTITLE_CONFLICT", "匹配的片段均与要求排除的字幕重叠，请修改包含或排除条件。")
     return keep
 
 

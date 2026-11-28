@@ -2,20 +2,48 @@
 
 from sqlalchemy import insert, select, update
 
-from cutsieve.application.workflow_state import NeedsInput
 from .processing_catalog import StaleAttempt, record
 from .processing_tables import runs, records
-from .workflow_budget import cost, price_config, workspace_balance
 from .workspace_budget_table import workspace_budgets
+
+
+def cost(tokens, rate):
+    return (tokens * rate + 999999) // 1000000
+
+
+def price_config(env):
+    prefix = "CUTSIEVE_FLASH_CNY_"
+    input_price = env[prefix + "INPUT_MICROS_PER_MILLION"]
+    output_price = env[prefix + "OUTPUT_MICROS_PER_MILLION"]
+    version = env["CUTSIEVE_FLASH_PRICE_VERSION"]
+    if not version or not all(str(value).isdigit() for value in (input_price, output_price)):
+        raise ValueError("Invalid visual pricing")
+    return dict(input=int(input_price), output=int(output_price), version=version)
+
+
+def workspace_balance(db, workspace, currency):
+    fields = dict(workspace=workspace, currency=currency, exposure=0)
+    if db.get_bind().dialect.name == "mysql":
+        from sqlalchemy.dialects.mysql import insert as insert_mysql
+
+        statement = insert_mysql(workspace_budgets).values(**fields)
+        db.execute(statement.on_duplicate_key_update(workspace=statement.inserted.workspace))
+    else:
+        from sqlalchemy.dialects.sqlite import insert as insert_sqlite
+
+        db.execute(insert_sqlite(workspace_budgets).values(**fields).on_conflict_do_nothing())
+    match = (workspace_budgets.c.workspace == workspace, workspace_budgets.c.currency == currency)
+    amount = db.execute(select(workspace_budgets.c.exposure).where(*match).with_for_update()).scalar_one()
+    return match, amount
 
 
 def billed_window(catalog, run, unit, payload_bytes, images, env, send):
     currency = "CNY"
     try:
-        price = price_config(env, currency)
+        price = price_config(env)
         run_limit = int(env["CUTSIEVE_MEDIA_VISUAL_MAX_CNY_MICROUNITS"])
         workspace_limit = int(env["CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS"])
-    except (NeedsInput, KeyError, ValueError):
+    except (KeyError, ValueError):
         raise ValueError("视觉调用缺少定价或费用上限") from None
     # The serialized payload includes the JPEG data. Bound text separately from the images.
     text_tokens = min(payload_bytes, 4096)

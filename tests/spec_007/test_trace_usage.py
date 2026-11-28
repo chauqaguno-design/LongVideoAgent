@@ -1,30 +1,40 @@
-"""Correlate a local provider socket timeout and a real, fully decoded export."""
+"""Exercise the real aiohttp wire protocol, retry, and durable usage telemetry."""
+
+import json
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json
-import os
-from pathlib import Path
-import shutil
 from threading import Event, Thread
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
-from cutsieve.application.workflow_state import DEFAULT_BUDGET
-from cutsieve.infrastructure.providers.workflow_flash import FlashPlanner
+from cutsieve.application.agent_harness import decode_assistant
+from cutsieve.application.edit_timeline import EditError
+from cutsieve.infrastructure.providers.config import ProviderConfig
 from cutsieve.presentation.api.app import create_app
-from test_workspace_contract import json_body, prepare_workspace, wait_for
 
 
 @contextmanager
-def slow_endpoint():
-    received, release = Event(), Event()
+def model_endpoint():
+    payloads, release = [], Event()
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
-            self.rfile.read(int(self.headers["Content-Length"]))
-            received.set()
-            release.wait(5)
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            payloads.append((self.path, self.headers.get("Authorization"), request))
+            if len(payloads) == 1:
+                release.wait(5)
+                return
+            body = json.dumps(dict(
+                model="provider/deepseek-v4-flash-2026-10-25",
+                choices=[dict(message=dict(role="assistant", content="The model is responding."))],
+                usage=dict(prompt_tokens=120, completion_tokens=40),
+            )).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def log_message(self, *_):
             pass
@@ -33,77 +43,85 @@ def slow_endpoint():
         thread = Thread(target=server.serve_forever)
         thread.start()
         try:
-            yield f"http://127.0.0.1:{server.server_port}/v1", received
+            yield f"http://127.0.0.1:{server.server_port}/v1", payloads
         finally:
             release.set()
             server.shutdown()
             thread.join()
 
 
-def events(client, run):
-    response = client.get(f"/v1/workflow-runs/{run}/events")
-    response.raise_for_status()
-    values = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
-    assert all(v["run_id"] == run for v in values)
-    return [v["payload"] for v in values]
+def create_run(client):
+    project = client.post("/v1/projects", json={"title": "Telemetry"}).json()["project_id"]
+    response = client.post(f"/v1/projects/{project}/conversation-runs",
+                           json=dict(message="Are you responding?", idempotency_key="model-telemetry"))
+    assert response.status_code == 202
+    return "/v1/workflow-runs/" + response.json()["run_id"]
 
 
-@pytest.mark.real_media
-def test_socket_timeout_and_decoded_export_have_correlated_durable_traces(tmp_path, monkeypatch):
-    ffmpeg = os.getenv("CUTSIEVE_FFMPEG") or shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
-    if not ffmpeg:
-        pytest.skip("FFmpeg required")
-    monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
-    root = tmp_path / "app"
-    with TestClient(create_app(work_dir=root)) as client, slow_endpoint() as (url, received):
-        movie = prepare_workspace(client, tmp_path, ffmpeg, "trace_editor")
-        model = "deepseek-flash-local-test"
-        planner = FlashPlanner({
-            "CUTSIEVE_WORKFLOW_LIVE_MODEL": "1", "CUTSIEVE_MODEL_BASE_URL": url,
-            "CUTSIEVE_MODEL_MODEL": "deepseek-flash", "CUTSIEVE_MODEL_API_KEY": "loopback-fixture-only",
-            "CUTSIEVE_MODEL_VERSION": model, "CUTSIEVE_MODEL_NATIVE_TOOLS": "1",
-            "CUTSIEVE_MODEL_TIMEOUT_SECONDS": "0.25", "CUTSIEVE_WORKSPACE_CNY_MAX_COST_MICROUNITS": "50000",
-            "CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION": "200", "CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION": "600",
-            "CUTSIEVE_FLASH_PRICE_VERSION": "fixture-price-2026",
-        })
-        client.app.state.workflow_worker.planner = planner
-        failed = json_body(client.post("/v1/workflow-runs", json=dict(scope=movie["scope"], intent="EDIT",
-            message="找人物犹豫后才开口的片段", budget=dict(DEFAULT_BUDGET, max_cost_microunits=50000),
-            idempotency_key="timeout-audit")))["run_id"]
-        state = wait_for(client, "/v1/workflow-runs/" + failed, {"QUEUED", "RUNNING", "WAITING_JOB"})
-        assert received.is_set() and state["status"] == "FAILED" and state["error"]["code"] == "MODEL_TIMEOUT"
-        assert state["error"]["retryable"]
+def test_native_aiohttp_timeout_then_failed_resume_without_cost_gate(tmp_path, wait_state, workflow_events):
+    with model_endpoint() as (url, requests):
+        app = create_app(work_dir=tmp_path)
+        config = dict(
+            CUTSIEVE_MODEL_BASE_URL=url,
+            CUTSIEVE_MODEL_API_KEY="fixture-key",
+            CUTSIEVE_MODEL_MODEL="deepseek-v4-flash",
+            CUTSIEVE_MODEL_TIMEOUT_SECONDS="0.3",
+            CUTSIEVE_CHAT_LIVE_MODEL="0",
+            CUTSIEVE_CHAT_MAX_COST_MICROUNITS="0",
+            CUTSIEVE_FLASH_CNY_INPUT_MICROS_PER_MILLION="1000000",
+            CUTSIEVE_FLASH_CNY_OUTPUT_MICROS_PER_MILLION="2000000",
+        )
+        app.state.workflow_worker.harness.env = config
+        with TestClient(app) as client:
+            path = create_run(client)
+            failed = wait_state(client, path, ("FAILED",))
+            assert failed["error"]["code"] == "MODEL_TIMEOUT" and failed["error"]["retryable"]
+            assert failed["usage"]["model_calls"] == 1 and failed["usage"]["input_tokens"] == 0
+            assert workflow_events(client, path)[-1]["type"] == "RUN_FAILED"
 
-    # Read the public trace and signed validation report on a fresh API instance.
-    with TestClient(create_app(work_dir=root)) as client:
-        timeout = events(client, failed)
-        final = next(p for p in timeout if p.get("activity") == "model.failed")
-        start = next(p for p in timeout if p.get("activity") == "model.reserved")
-        usage = json_body(client.get("/v1/workflow-runs/" + failed))["budget_usage"]
-        assert start["request_id"] == final["request_id"]
-        assert final["resolved_model"] == model and final["error_code"] == "MODEL_TIMEOUT"
-        assert final["latency_ms"] >= 200 and final["usage_known"] is False
-        assert final["input_tokens"] is final["output_tokens"] is final["charged_microunits"] is None
-        assert final["uncertain_microunits"] == start["reserved_microunits"] == usage["uncertain_microunits"] > 0
-        assert final["price_version"] == start["price_version"] == usage["price_version"] == "fixture-price-2026"
-        assert final["currency"] == usage["currency"] == "CNY"
-        assert usage["model_calls"] == 1 and usage["reserved_microunits"] == usage["committed_microunits"] == 0
+        restarted = create_app(work_dir=tmp_path)
+        restarted.state.workflow_worker.harness.env = config
+        with TestClient(restarted) as client:
+            retry = client.post(path + "/resume", json=dict(
+                expected_state_version=failed["state_version"], message="Please retry.", idempotency_key="retry-model",
+            ))
+            assert retry.status_code == 202
+            state = wait_state(client, path)
+            assert state["usage"]["model_calls"] == 2
+            assert state["usage"]["input_tokens"] == 120 and state["usage"]["output_tokens"] == 40
+            assert state["usage"]["estimated_cost_cny"] == pytest.approx(.0002)
+            assert state["budget_usage"]["committed_microunits"] == 200
+            assert workflow_events(client, path, failed["last_event_id"])[-1]["type"] == "RUN_COMPLETED"
+        assert len(requests) == 2
+        for path, auth, payload in requests:
+            assert path == "/v1/chat/completions" and auth == "Bearer fixture-key"
+            assert payload["model"] == "deepseek-v4-flash" and len(payload["tools"]) == 8
+            assert "response_format" not in payload
+        assert requests[1][2]["messages"][-1] == dict(role="user", content="Please retry.")
 
-        render = events(client, movie["run"])
-        done = next(p for p in render if p.get("activity") == "render.finished" and p["profile"] == "EXPORT")
-        submit = next(p for p in render if p.get("activity") == "tool.finished" and p.get("render_job_id") == movie["job"])
-        assert submit["tool"] == "render.submit" and submit["latency_ms"] >= 0
-        assert submit["render_job_id"] == done["render_job_id"] == movie["job"]
-        assert submit["revision_id"] == done["revision_id"] == movie["revision"]
-        assert done["artifact_id"] == movie["export"]
-        audit = json_body(client.get("/v1/artifacts/" + done["validation_report_id"]))
-        report = json_body(client.get(audit["url"]))
-        assert report["full_decode"] and report["render_latency_ms"] > 0
-        assert report["render_job_id"] == movie["job"] and report["revision_id"] == movie["revision"]
-        assert json_body(client.get("/v1/workflow-runs/" + movie["run"]))["budget_usage"]["model_calls"] == 0
-        if dest := os.getenv("CUTSIEVE_TEST_TRACE_OUTPUT"):
-            proof = dict(external_model_calls=0, loopback_http_calls=1,
-                         timeout=dict(run_id=failed, reserved=start, settlement=final, usage=usage),
-                         render=dict(run_id=movie["run"], submission=submit, completion=done,
-                                     render_latency_ms=report["render_latency_ms"], full_decode=True))
-            Path(dest).write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding="utf8")
+
+@pytest.mark.parametrize("env", [{}, dict(CUTSIEVE_MODEL_BASE_URL="http://localhost/v1", CUTSIEVE_WORKFLOW_LIVE_MODEL="0")])
+def test_model_not_configured_error_is_actionable(tmp_path, wait_state, env):
+    app = create_app(work_dir=tmp_path)
+    app.state.workflow_worker.harness.env = env
+    with TestClient(app) as client:
+        state = wait_state(client, create_run(client), ("FAILED",))
+        assert state["error"]["code"] == "MODEL_NOT_CONFIGURED"
+        assert "CUTSIEVE_MODEL_BASE_URL" in state["error"]["message"]
+        assert state["awaiting_input"] is None and state["usage"]["model_calls"] == 0
+
+
+def test_configured_request_options_and_model_alias(tmp_path, fake_agent, wait_state):
+    app = create_app(work_dir=tmp_path, agent_transport=fake_agent)
+    app.state.workflow_worker.harness.env = dict(
+        CUTSIEVE_MODEL_BASE_URL="https://api.deepseek.com/v1",
+        CUTSIEVE_MODEL_API_KEY="fake-key", CUTSIEVE_MODEL_MODEL="deepseek-v4-flash",
+    )
+    fake_agent.responses = [fake_agent.reply(text="Ready.")]
+    with TestClient(app) as client:
+        wait_state(client, create_run(client))
+    assert fake_agent.requests[0]["thinking"] == {"type": "disabled"}
+    config = ProviderConfig("http://localhost/v1", "alias", response_model="vendor/deepseek-v4-flash")
+    with pytest.raises(EditError) as error:
+        decode_assistant({"model": "deepseek-v4-pro"}, config)
+    assert error.value.code == "MODEL_MISMATCH"

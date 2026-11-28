@@ -1,5 +1,6 @@
 """Restore source bytes, pinned evidence, timeline and render into an empty directory."""
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -13,7 +14,7 @@ from scripts.workspace_snapshot import backup, restore
 
 
 @pytest.mark.real_media
-def test_restore_and_render(tmp_path):
+def test_restore_and_render(tmp_path, fake_agent, wait_state):
     ffmpeg = shutil.which("ffmpeg", path=os.getenv("CUTSIEVE_FFMPEG_DIR"))
     if not ffmpeg:
         pytest.skip("Release recovery requires FFmpeg")
@@ -37,13 +38,28 @@ def test_restore_and_render(tmp_path):
         raise TimeoutError(path)
 
     src = tmp_path / "source"
-    with TestClient(create_app(work_dir=src)) as c:
+    with TestClient(create_app(work_dir=src, agent_transport=fake_agent)) as c:
         pid = post(c, "/projects", {"title": "恢复演练"})["project_id"]
         upload = post(c, f"/projects/{pid}/assets", dict(filename="story.mp4", size_bytes=len(data), content_type="video/mp4"))
         etag = c.put(upload["parts"][0]["url"], content=data).headers["ETag"]
         asset = post(c, f"/uploads/{upload['upload_id']}/complete", dict(idempotency_key="complete-source",
                      parts=[dict(part_number=1, etag=etag)]))
+        index = c.get(f"/v1/assets/{asset['asset_id']}/processing-runs").json()["items"][0]["processing_run_id"]
+        wait_state(c, "/v1/processing-runs/" + index, ("SUCCEEDED", "PARTIAL"))
         scope = dict(project_id=pid, media_revision_ids=[asset["media_revision_id"]])
+        tool, reply = fake_agent.tool, fake_agent.reply
+
+        def cut(request):
+            hits = json.loads(request["messages"][-1]["content"])["hits"]
+            hit = next(h for h in hits if h["source"] == "embedded-subtitle")
+            return reply(tool("edit", "edit_timeline", dict(clips=[
+                dict(start_s=hit["start_s"], end_s=hit["end_s"], evidence_ids=[hit["evidence_id"]]),
+            ])), tool("preview", "render_video"))
+
+        fake_agent.responses = [
+            reply(tool("lookup", "search_evidence", dict(query='"Where is my ticket?"'))),
+            cut, reply(text="预览已生成。"),
+        ]
         workflow = post(c, "/workflow-runs", dict(scope=scope, intent="EDIT", message="剪出台词「Where is my ticket?」",
                         idempotency_key="restore-preview"))
         rid = workflow["run_id"]

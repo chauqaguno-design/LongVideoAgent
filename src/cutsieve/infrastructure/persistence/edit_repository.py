@@ -76,35 +76,42 @@ class EditRepository:
                 db.execute(text("BEGIN IMMEDIATE"))
             yield db
 
-    def with_receipt(self, workspace, scope, kind, body, run, guard=None):
+    def with_receipt(self, workspace, scope, kind, body, run, guard=None, *, session=None):
         # Preserve case-sensitive key identity under MySQL's default collation.
         key = digest(body["idempotency_key"])
         signature = digest(body)
         predicate = and_(receipts.c.workspace_id == workspace, receipts.c.scope_id == scope,
                          receipts.c.kind == kind, receipts.c.key == key)
+
+        def save(db):
+            if guard is not None:
+                guard(db)
+            previous = db.execute(select(receipts).where(predicate)).first()
+            if previous:
+                if previous.digest != signature:
+                    raise EditError(409, "IDEMPOTENCY_CONFLICT", "该幂等键已用于其他请求")
+                return previous.result, True
+            # Reserve the key before checking expected_revision.
+            db.execute(insert(receipts).values(workspace_id=workspace, scope_id=scope,
+                       kind=kind, key=key, digest=signature, result={}))
+            answer = run(db)
+            db.execute(update(receipts).where(predicate).values(result=answer))
+            return answer, False
+
+        if session is not None:
+            # The caller commits the effect, receipt and workflow checkpoint together.
+            return save(session)
         # Two transactions can attempt the first insert of the same key/cache slot.
         # Roll back the losing transaction and read the winner using a fresh snapshot.
         for attempt in range(2):
             try:
                 with self.write() as db:
-                    if guard is not None:
-                        guard(db)
-                    previous = db.execute(select(receipts).where(predicate)).first()
-                    if previous:
-                        if previous.digest != signature:
-                            raise EditError(409, "IDEMPOTENCY_CONFLICT", "该幂等键已用于其他请求")
-                        return previous.result, True
-                    # Reserve the key before checking expected_revision.
-                    db.execute(insert(receipts).values(workspace_id=workspace, scope_id=scope,
-                               kind=kind, key=key, digest=signature, result={}))
-                    answer = run(db)
-                    db.execute(update(receipts).where(predicate).values(result=answer))
-                    return answer, False
+                    return save(db)
             except IntegrityError:
                 if attempt:
                     raise
 
-    def create(self, workspace, body, *, guard=None):
+    def create(self, workspace, body, *, guard=None, session=None):
         self.sources.project(workspace, body["project_id"])
         def save(db):
             edit_id = uid()
@@ -114,7 +121,7 @@ class EditRepository:
                        head_revision_id=rev["revision_id"]))
             self.insert_revision(db, rev)
             return project_view(one(db, owned(projects, workspace, edit_id)))
-        return self.with_receipt(workspace, body["project_id"], "create", body, save, guard)[0]
+        return self.with_receipt(workspace, body["project_id"], "create", body, save, guard, session=session)[0]
 
     @staticmethod
     def insert_revision(db, rev):
@@ -141,7 +148,7 @@ class EditRepository:
             return dict(items=[view(r) for r in rows[:limit]],
                         next_cursor=str(rows[limit-1]._mapping[sort_key]) if len(rows) > limit else None)
 
-    def patch(self, workspace, edit_id, body, *, guard=None, brief_id=None, validate_result=None):
+    def patch(self, workspace, edit_id, body, *, guard=None, session=None):
         def save(db):
             parent = one(db, owned(projects, workspace, edit_id).with_for_update())
             if parent.head != body["expected_revision"]:
@@ -179,11 +186,7 @@ class EditRepository:
 
             before = load_rev(parent.head_revision_id)
             rev, assignments = apply_patch(before, body["operations"], load_rev, check_clip)
-            if validate_result is not None:
-                validate_result(before, rev)
             self.sources.require_readable(db, workspace, checked)
-            if brief_id is not None:
-                rev["source_brief_id"] = brief_id
             updated = db.execute(update(projects).where(projects.c.id == edit_id, projects.c.head == parent.head)
                                  .values(head=rev["revision_no"], head_revision_id=rev["revision_id"]))
             if updated.rowcount != 1:
@@ -196,10 +199,10 @@ class EditRepository:
             return dict(operation_id=operation_id, edit_project_id=edit_id, idempotency_key=body["idempotency_key"],
                         request_hash=digest(body), revision_id=rev["revision_id"], revision_no=rev["revision_no"],
                         clip_id_assignments=assignments)
-        result, replayed = self.with_receipt(workspace, edit_id, "patch", body, save, guard)
+        result, replayed = self.with_receipt(workspace, edit_id, "patch", body, save, guard, session=session)
         return dict(result, replayed=replayed)
 
-    def enqueue(self, workspace, body, *, export_format="mp4", guard=None):
+    def enqueue(self, workspace, body, *, export_format="mp4", guard=None, session=None):
         revision_id = body["revision_id"]
         if export_format not in EXPORT_FORMATS:
             raise EditError(422, "UNSUPPORTED_FORMAT", "支持导出 MP4、WebM 和 MKV")
@@ -227,10 +230,12 @@ class EditRepository:
             emit(db,uid(),workspace,job_id,"render.queued")
             return job_id
         request = body if export_format == "mp4" else dict(body, export_format=export_format)
-        job_id, _ = self.with_receipt(workspace, workspace, "render", request, save, guard)
+        job_id, _ = self.with_receipt(workspace, workspace, "render", request, save, guard, session=session)
+        if session is not None:
+            return job_view(one(session, owned(jobs, workspace, job_id)))
         return self.get(jobs, workspace, job_id, job_view)
 
-    def cancel(self, workspace, job_id, body):
+    def cancel(self, workspace, job_id, body, *, session=None):
         def save(db):
             row = one(db, owned(jobs, workspace, job_id).with_for_update())
             if row.status in ("QUEUED", "RUNNING", "VALIDATING"):
@@ -239,5 +244,7 @@ class EditRepository:
                     result=dict(row.result, cancel_requested_at=timestamp())))
                 emit(db, uid(), workspace, job_id, "render.finished")
             return job_id
-        self.with_receipt(workspace, job_id, "cancel", body, save)
+        self.with_receipt(workspace, job_id, "cancel", body, save, session=session)
+        if session is not None:
+            return job_view(one(session, owned(jobs, workspace, job_id)))
         return self.get(jobs, workspace, job_id, job_view)

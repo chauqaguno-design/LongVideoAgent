@@ -1,10 +1,8 @@
-"""Read tools exposed to the planner and their input boundaries."""
+"""Shared HTTP and tool types for media search and timeline edits."""
 
-from dataclasses import dataclass
-from functools import cache
 from typing import Annotated, Literal, NotRequired, TypedDict
 
-from pydantic import AfterValidator, ConfigDict, Field, TypeAdapter
+from pydantic import AfterValidator, ConfigDict, Field
 
 
 class RequestBody(TypedDict):
@@ -20,6 +18,14 @@ Message = Annotated[str, Field(min_length=1, max_length=12_000)]
 class TimeRange(RequestBody):
     start_us: TimeUs
     end_us: TimeUs
+
+
+class OutputProfile(RequestBody):
+    width: Annotated[int, Field(ge=2, le=7680, multiple_of=2)]
+    height: Annotated[int, Field(ge=2, le=4320, multiple_of=2)]
+    fps_num: Annotated[int, Field(ge=1)]
+    fps_den: Annotated[int, Field(ge=1)]
+    audio_sample_rate: Literal[48000]
 
 
 class Scope(RequestBody):
@@ -43,89 +49,3 @@ def require_query(body: SearchQuery) -> SearchQuery:
 
 
 SearchRequest = Annotated[SearchQuery, AfterValidator(require_query)]
-
-
-class SegmentArgs(RequestBody):
-    media_revision_id: ResourceId
-    range: TimeRange
-
-
-class ContextArgs(RequestBody):
-    evidence_id: ResourceId
-    before_us: TimeUs
-    after_us: TimeUs
-    offset: NotRequired[Nonnegative]
-
-
-class CoverageArgs(SegmentArgs):
-    query_run_id: ResourceId
-    protocol_id: str
-
-
-class RevisionArgs(RequestBody):
-    revision_id: ResourceId
-
-
-class TimelineArgs(RevisionArgs):
-    edit_project_id: ResourceId
-
-
-class JobArgs(RequestBody):
-    job_id: ResourceId
-
-
-@dataclass(frozen=True)
-class ToolContract:
-    name: str
-    phases: tuple[str, ...]
-    args: TypeAdapter
-    description: str
-
-    @property
-    def provider_name(self):
-        return self.name.replace(".", "__")
-
-    def validate(self, value):
-        self.args.validate_python(value)
-
-    def definition(self):
-        return {"type": "function", "function": {
-            "name": self.provider_name, "description": self.description, "parameters": self.args.json_schema(),
-        }}
-
-
-class ToolCatalog:
-    def __init__(self, entries):
-        self.tools = {name: ToolContract(name, phases, TypeAdapter(args), description)
-                      for name, phases, args, description in entries}
-        self.by_provider = {tool.provider_name: tool for tool in self.tools.values()}
-
-    def for_provider_call(self, wire, phase):
-        tool = self.by_provider.get(wire)
-        if tool is None or phase not in tool.phases:
-            raise ValueError("Unknown or unauthorized read tool")
-        return tool
-
-    def provider_tools(self, phase):
-        return [tool.definition() for tool in self.tools.values() if phase in tool.phases]
-
-
-@cache
-def tool_catalog():
-    search = ("PLAN", "MATERIAL")
-    return ToolCatalog((
-        ("video.search_evidence", search, SearchRequest, "Find candidate evidence in the authorized scope."),
-        ("video.get_segment", search, SegmentArgs, "Read evidence references for a source interval."),
-        ("video.get_context_window", (*search, "PROPOSE", "REVIEW"), ContextArgs, "Read around a known evidence ID."),
-        ("video.check_coverage", search, CoverageArgs, "Check the requested interval for unverified ranges."),
-        ("audio.inspect_transcript", search, SegmentArgs, "Read transcript references and quality flags."),
-        ("edit.get_timeline", ("PLAN", "PROPOSE", "REVIEW"), TimelineArgs, "Read a bound timeline revision."),
-        ("edit.validate_timeline", ("PLAN", "PROPOSE"), RevisionArgs, "Check a bound timeline revision."),
-        ("jobs.get", (*search, "REVIEW"), JobArgs, "Read the status of a job belonging to this run."),
-    ))
-
-
-def validate_contract(name, body):
-    """Review report check used by the review stage."""
-    if name != "ReviewReport" or body.get("output_kind") not in ("PREVIEW", "EXPORT"):
-        raise ValueError("Invalid review report")

@@ -38,6 +38,7 @@ def test_capabilities_uses_local_defaults_and_environment(client, monkeypatch):
     for key in tuple(os.environ):
         if key.startswith("CUTSIEVE_MODEL") or key in ("CUTSIEVE_BASE_URL", "CUTSIEVE_DEEPSEEK_BASE_URL"):
             monkeypatch.delenv(key)
+    monkeypatch.delenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", raising=False)
     local = client.get("/v1/capabilities").json()
     assert not any(local[key] for key in ("text", "vision", "native_tools", "structured_json"))
 
@@ -45,5 +46,6 @@ def test_capabilities_uses_local_defaults_and_environment(client, monkeypatch):
     monkeypatch.setenv("CUTSIEVE_MODEL_MODEL", "local-vlm")
     configured = client.get("/v1/capabilities").json()
     assert configured["resolved_model_version"] == "local-vlm"
-    assert configured["text"] and configured["vision"] and configured["structured_json"]
-    assert not configured["native_tools"]
+    assert configured["text"] and configured["vision"] and configured["structured_json"] and configured["native_tools"]
+    monkeypatch.setenv("CUTSIEVE_WORKFLOW_LIVE_MODEL", "0")
+    assert client.get("/v1/capabilities").json()["native_tools"] is False

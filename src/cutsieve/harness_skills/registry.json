@@ -1,7 +1,0 @@
-[
-  {"id":"evidence-search","version":"1.0","description":"Find and compare source evidence","phases":["MATERIAL"],"tools":["video.search_evidence","video.get_segment","video.get_context_window","video.check_coverage","audio.inspect_transcript","jobs.get"]},
-  {"id":"evidence-inspection","version":"1.0","description":"Verify what is visible in a bounded source interval","phases":["MATERIAL"],"tools":["video.get_segment","video.get_context_window","audio.inspect_transcript"]},
-  {"id":"grounded-editing","version":"1.0","description":"Build an edit using verified source intervals","phases":["PLAN","PROPOSE"],"tools":["video.search_evidence","video.get_segment","video.get_context_window","video.check_coverage","audio.inspect_transcript","edit.get_timeline","edit.validate_timeline","jobs.get"]},
-  {"id":"timeline-refinement","version":"1.0","description":"Replace a selected clip while preserving its neighbors","phases":["PLAN","PROPOSE"],"tools":["video.search_evidence","video.get_context_window","edit.get_timeline","edit.validate_timeline"]},
-  {"id":"output-review","version":"1.0","description":"Report concrete issues in the compiled output","phases":["REVIEW"],"tools":["jobs.get","video.get_context_window","edit.get_timeline"]}
-]

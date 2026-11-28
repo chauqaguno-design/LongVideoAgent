@@ -1,99 +1,134 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
-import { listAll, makeCommand, request } from './editApi.js'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { listAll, makeCommand, renderArtifact, request } from './editApi.js'
 import { exportFormat, exportFormats, interval } from './projectView.js'
-import SourceMoment from './SourceMoment.vue'
 import ExportDownload from './ExportDownload.vue'
 
-const props = defineProps({ revision: Object, assets: Array })
-const mapping = ref(null)
-const moment = ref(null)
+const props = defineProps({ revision: Object, hints: Object, refreshKey: Number })
+const emit = defineEmits(['seek', 'play', 'preview-ready'])
 const jobs = ref([])
+const files = ref({})
+const formats = ref({})
 const format = ref('mp4')
-const exportTypes = ref({})
-const artifact = ref(null)
+const mapping = ref(null)
 const error = ref('')
 const busy = ref(false)
+const labels = { QUEUED: '排队中', RUNNING: '生成中', VALIDATING: '校验中', SUCCEEDED: '已完成', FAILED: '失败', CANCELLED: '已取消' }
+const active = job => ['QUEUED', 'RUNNING', 'VALIDATING'].includes(job.status)
 const submit = makeCommand()
 const lifecycle = new AbortController()
-const labels = { QUEUED: '排队中', RUNNING: '生成中', VALIDATING: '校验中', SUCCEEDED: '已完成', FAILED: '失败', CANCELLED: '已取消' }
-const pending = job => ['QUEUED', 'RUNNING', 'VALIDATING'].includes(job.status)
+const resolving = new Set()
 let timer
 let generation = 0
 
+const renderRows = computed(() => {
+  const rows = [...jobs.value]
+  for (const [profile, id] of [['PREVIEW', props.hints?.preview], ['EXPORT', props.hints?.export]]) {
+    if (!id || rows.some(job => job.artifact_id === id)) continue
+    rows.unshift({ render_job_id: id, profile, status: 'SUCCEEDED', artifact_id: id })
+  }
+  return rows
+})
+
+const latestPreview = computed(() => {
+  const ready = renderRows.value.filter(row => row.status === 'SUCCEEDED' && files.value[row.artifact_id])
+  const job = ready.find(row => row.profile === 'PREVIEW') || ready.find(row => files.value[row.artifact_id]?.mime_type !== 'video/x-matroska')
+  return job ? { file: files.value[job.artifact_id], revisionNo: props.revision.revision_no } : null
+})
+
+watch(latestPreview, preview => emit('preview-ready', preview))
+
+async function hydrate() {
+  await Promise.all(renderRows.value.map(async job => {
+    const id = job.artifact_id
+    if (!id || job.status !== 'SUCCEEDED' || files.value[id] || resolving.has(id)) return
+    resolving.add(id)
+    try {
+      const file = await renderArtifact(id, job.profile, props.revision.revision_id, lifecycle.signal)
+      if (!lifecycle.signal.aborted) files.value[id] = file
+    } catch (cause) {
+      if (!lifecycle.signal.aborted) error.value = cause.message
+    } finally {
+      resolving.delete(id)
+    }
+  }))
+}
+
 async function refresh() {
+  if (!props.revision) return
   const requestNo = ++generation
   clearTimeout(timer)
+  const valid = () => requestNo === generation && !lifecycle.signal.aborted
   try {
     const all = await listAll('/edit-projects/' + props.revision.edit_project_id + '/render-jobs', lifecycle.signal)
-    if (requestNo !== generation || lifecycle.signal.aborted) return
-    jobs.value = all.filter(j => j.revision_id === props.revision.revision_id)
-    if (jobs.value.some(pending)) timer = setTimeout(refresh, 1500)
-    await Promise.all(
-      jobs.value
-        .filter(job => job.profile === 'EXPORT' && job.artifact_id && !exportTypes.value[job.render_job_id])
-        .map(async job => {
-          const file = await request('/artifacts/' + job.artifact_id, undefined, lifecycle.signal)
-          exportTypes.value[job.render_job_id] = exportFormat(file.mime_type)?.label
-        })
-    )
+    if (!valid()) return
+    jobs.value = all.filter(job => job.revision_id === props.revision.revision_id)
+    await hydrate()
   } catch (cause) {
-    if (!lifecycle.signal.aborted) error.value = cause.message
+    if (valid()) error.value = cause.message
+  } finally {
+    if (valid() && jobs.value.some(active)) timer = setTimeout(refresh, 1500)
   }
 }
 
-async function render(profile, cancelJob) {
+async function act(action) {
+  if (busy.value) return
   error.value = ''
   busy.value = true
   try {
-    if (cancelJob) await submit('/render-jobs/' + cancelJob.render_job_id + '/cancel', {})
-    else {
-      const exporting = profile === 'EXPORT'
-      const query = exporting && format.value !== 'mp4' ? '?format=' + format.value : ''
-      const job = await submit('/render-jobs' + query, { revision_id: props.revision.revision_id, profile })
-      if (exporting) exportTypes.value[job.render_job_id] = exportFormats.find(f => f.extension === format.value).label
-    }
+    await action()
+  } catch (cause) {
+    if (!lifecycle.signal.aborted) error.value = cause.message
+  } finally {
+    busy.value = false
+  }
+}
+
+function render(profile) {
+  return act(async () => {
+    const output = format.value
+    const path = profile === 'EXPORT' && output !== 'mp4' ? '/render-jobs?format=' + output : '/render-jobs'
+    const job = await submit(path, { revision_id: props.revision.revision_id, profile })
+    if (lifecycle.signal.aborted) return
+    if (profile === 'EXPORT') formats.value[job.render_job_id] = exportFormats.find(row => row.extension === output).label
+    jobs.value = [job, ...jobs.value.filter(row => row.render_job_id !== job.render_job_id)]
+    await refresh()
+  })
+}
+
+function cancel(job) {
+  return act(async () => {
+    await submit('/render-jobs/' + job.render_job_id + '/cancel', { reason: '用户取消渲染' })
     if (!lifecycle.signal.aborted) await refresh()
-  } catch (cause) {
-    error.value = cause.message
-  } finally {
-    busy.value = false
-  }
+  })
 }
 
-async function openResult(job) {
-  busy.value = true
+function play(file) {
+  emit('play', { file, revisionNo: props.revision.revision_no })
+}
+
+function toggleMapping(job) {
+  if (mapping.value?.id === job.render_job_id) {
+    mapping.value = null
+    return
+  }
+  return act(async () => {
+    const { signal } = lifecycle
+    const file = await request('/artifacts/' + job.compiled_manifest_artifact_id, undefined, signal)
+    const response = await fetch(file.url, { credentials: 'omit', signal })
+    if (!response.ok) throw new Error('源片映射暂不可用')
+    const data = await response.json()
+    if (!signal.aborted) mapping.value = { id: job.render_job_id, clips: data.clips }
+  })
+}
+
+function retry() {
   error.value = ''
-  try {
-    const result = await request('/artifacts/' + job.artifact_id, undefined, lifecycle.signal)
-    if (!result.url) throw new Error('视频暂时不可用，请刷新后重试。')
-    if (result.timeline_revision_id !== props.revision.revision_id || result.kind !== job.profile) {
-      throw new Error('成片与当前剪辑版本不符')
-    }
-    artifact.value = { ...result, profile: job.profile }
-  } catch (cause) {
-    error.value = cause.message
-  } finally {
-    busy.value = false
-  }
+  return refresh()
 }
 
-async function showMapping(job) {
-  busy.value = true
-  try {
-    const file = await request('/artifacts/' + job.compiled_manifest_artifact_id, undefined, lifecycle.signal)
-    const response = await fetch(file.url, { credentials: 'omit', signal: lifecycle.signal })
-    if (!response.ok) throw new Error('时间映射暂不可用')
-    mapping.value = await response.json()
-    moment.value = null
-  } catch (cause) {
-    if (!lifecycle.signal.aborted) error.value = cause.message
-  } finally {
-    busy.value = false
-  }
-}
-
-onMounted(refresh)
+watch(() => props.refreshKey, refresh, { immediate: true })
+watch(() => props.hints, hydrate, { immediate: true })
 onUnmounted(() => {
   lifecycle.abort()
   clearTimeout(timer)
@@ -101,50 +136,50 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="edit-card edit-results">
-    <div class="edit-card-header">
-      <h2>预览与导出 <small>V{{ revision.revision_no }}</small></h2>
-      <div class="edit-actions">
-        <button :disabled="busy || !revision.clips.length" @click="render('PREVIEW')">生成预览</button>
-        <label>
-          导出格式
-          <select v-model="format" :disabled="busy">
-            <option v-for="f in exportFormats" :key="f.extension" :value="f.extension">{{ f.label }}</option>
-          </select>
-        </label>
-        <button class="edit-primary" :disabled="busy || !revision.clips.length" @click="render('EXPORT')">导出视频</button>
-        <button :disabled="busy" @click="refresh">刷新任务</button>
+  <section class="render-bar" aria-label="预览与导出">
+    <div class="render-controls">
+      <button :disabled="busy || !revision?.clips.length" @click="render('PREVIEW')">生成预览</button>
+      <div class="export-controls">
+        <select v-model="format" aria-label="导出格式" :disabled="busy || !revision?.clips.length">
+          <option v-for="item in exportFormats" :key="item.extension" :value="item.extension">{{ item.label }}</option>
+        </select>
+        <button class="primary" :disabled="busy || !revision?.clips.length" @click="render('EXPORT')">导出视频</button>
       </div>
     </div>
 
-    <ul v-if="jobs.length" class="edit-job-list" aria-live="polite">
-      <li v-for="job in jobs" :key="job.render_job_id">
-        <span>{{ job.profile === 'PREVIEW' ? '预览' : '导出' }} · {{ labels[job.status] }}<template v-if="pending(job)"> · {{ job.cancel_requested_at ? '正在取消' : Math.round(job.progress * 100) + '%' }}</template></span>
-        <small v-if="exportTypes[job.render_job_id]">{{ exportTypes[job.render_job_id] }}</small>
-        <button v-if="pending(job)" :disabled="busy || !!job.cancel_requested_at" @click="render(null, job)">取消任务</button>
-        <span v-if="job.error" role="alert">{{ job.error.message }}</span>
-        <button v-if="job.status === 'SUCCEEDED' && job.artifact_id" class="edit-primary" :disabled="busy" @click="openResult(job)">打开成片</button>
-        <button v-if="job.compiled_manifest_artifact_id" :disabled="busy" @click="showMapping(job)">查看源片对应</button>
+    <ul v-if="renderRows.length" class="edit-job-list" aria-live="polite">
+      <li v-for="job in renderRows" :key="job.render_job_id">
+        <span
+          class="status-pill"
+          :data-tone="active(job) ? 'running' : job.status === 'SUCCEEDED' ? 'ready' : job.status === 'FAILED' ? 'failed' : ''"
+        >
+          <i class="status-dot" aria-hidden="true"></i>
+          {{ job.profile === 'PREVIEW' ? '预览' : '导出' }} · {{ labels[job.status] || job.status }}
+          <span v-if="active(job)" class="mono">{{ job.cancel_requested_at ? '正在取消' : Math.round((job.progress || 0) * 100) + '%' }}</span>
+          <span v-if="job.profile === 'EXPORT'">{{ exportFormat(files[job.artifact_id]?.mime_type)?.label || formats[job.render_job_id] }}</span>
+        </span>
+        <button v-if="active(job)" class="bare-button" :disabled="busy || !!job.cancel_requested_at" @click="cancel(job)">取消渲染</button>
+        <span v-if="job.error" class="inline-error" role="alert">{{ job.error.message || job.error }}</span>
+        <template v-if="files[job.artifact_id]">
+          <button
+            v-if="files[job.artifact_id].mime_type !== 'video/x-matroska'"
+            class="bare-button teal"
+            @click="play(files[job.artifact_id])"
+          >{{ job.profile === 'EXPORT' ? '播放成片' : '播放预览' }}</button>
+          <ExportDownload v-if="job.profile === 'EXPORT'" :file="files[job.artifact_id]" :revision-id="revision.revision_id" @error="error = $event" />
+        </template>
+        <button v-if="job.compiled_manifest_artifact_id" class="bare-button" :disabled="busy" :aria-expanded="mapping?.id === job.render_job_id" @click="toggleMapping(job)">源片映射</button>
       </li>
     </ul>
-
-    <p v-if="error" role="alert">{{ error }}</p>
-
-    <template v-if="artifact">
-      <video v-if="artifact.mime_type !== 'video/x-matroska'" :key="artifact.url" :src="artifact.url" controls preload="metadata" aria-label="剪辑成片" />
-      <p v-else>MKV 可下载到本地播放器观看。</p>
-      <ExportDownload v-if="artifact.profile === 'EXPORT'" :file="artifact" :revision-id="revision.revision_id" @error="error = $event" />
-    </template>
+    <p v-if="error" class="inline-error" role="alert">{{ error }} <button class="bare-button" @click="retry">刷新渲染状态</button></p>
 
     <ol v-if="mapping" class="mapping-list">
       <li v-for="clip in mapping.clips" :key="clip.clip_id">
-        成片 {{ interval({ start_us: clip.output_start_us, end_us: clip.output_end_us }) }}
-        <button class="edit-link" @click="moment = { media_revision_id: clip.media_revision_id, range: clip.realized_source_range }">
-          原片 {{ interval(clip.realized_source_range) }}
+        <span>成片 <span class="mono">{{ interval({ start_us: clip.output_start_us, end_us: clip.output_end_us }) }}</span></span>
+        <button class="bare-button timecode" @click="emit('seek', { media_revision_id: clip.media_revision_id, ...clip.realized_source_range })">
+          原片 <span class="mono">{{ interval(clip.realized_source_range) }}</span>
         </button>
       </li>
     </ol>
-
-    <SourceMoment v-if="moment && assets" :assets="assets" :moment="moment" />
   </section>
 </template>
