@@ -1,5 +1,6 @@
 """Upload, revision-bound export and artifact playback over HTTP."""
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -37,7 +38,7 @@ def test_edit_upload_and_render_job(tmp_path, use_workspace):
                     idempotency_key="create-demo"), 201)
         with use_workspace(client, 2):
             assert client.get(f"/v1/edit-projects/{edit['edit_project_id']}").status_code == 404
-        clip = dict(media_revision_id=media["media_revision_id"], evidence_ids=[], audio_policy="keep")
+        clip = dict(media_revision_id=media["media_revision_id"], evidence_ids=[], audio_policy="mute")
         ops = [dict(op="append_clip",clip=dict(clip,source_start_us=start,source_end_us=end))
                for start,end in [(0,360000),(1000000,1440000)]]
         op_url = f"/v1/edit-projects/{edit['edit_project_id']}/operations"
@@ -91,3 +92,21 @@ def test_edit_upload_and_render_job(tmp_path, use_workspace):
             assert artifact["mime_type"] == download.headers["content-type"] == mime
             assert download.content.startswith(bytes.fromhex("1a45dfa3"))
             assert hashlib.sha256(download.content).hexdigest() == artifact["sha256"]
+            if fmt == "webm":
+                partial = client.get(artifact["url"], headers={"Range": "bytes=0-63"})
+                assert partial.status_code == 206
+                assert partial.headers["content-type"] == "video/webm"
+                assert partial.headers["accept-ranges"] == "bytes"
+                assert partial.headers["content-range"] == f"bytes 0-63/{len(download.content)}"
+                assert partial.content == download.content[:64]
+                out = tmp_path / "export.webm"
+                out.write_bytes(download.content)
+                ffprobe = os.getenv("CUTSIEVE_FFPROBE") or shutil.which(
+                    "ffprobe", path=os.getenv("CUTSIEVE_FFMPEG_DIR")
+                )
+                streams = json.loads(subprocess.check_output([
+                    ffprobe, "-v", "error", "-show_streams", "-of", "json", str(out),
+                ]))["streams"]
+                encoders = subprocess.check_output([ffmpeg, "-hide_banner", "-encoders"])
+                expected = "vp9" if b"libvpx-vp9" in encoders else "av1"
+                assert [(s["codec_type"], s["codec_name"]) for s in streams] == [("video", expected)]

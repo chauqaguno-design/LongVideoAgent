@@ -51,7 +51,7 @@ const clock = computed(() => mode.value === 'source' && range.value
 function requestPlayback(at, autoplay = false, endAt = null) {
   playbackIntent = { at, autoplay, endAt }
   position.value = at
-  if (file.value && fileExpired(file.value)) {
+  if (player.value?.error || (file.value && fileExpired(file.value))) {
     reload.value++
   } else if (player.value?.dataset.playbackKey === playbackKey.value && player.value.readyState >= 1) {
     applyPlayback()

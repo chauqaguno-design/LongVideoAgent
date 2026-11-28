@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import App from '../src/App.vue'
+import AgentTurn from '../src/editing/AgentTurn.vue'
 import RenderJobs from '../src/editing/RenderJobs.vue'
 import { clipDraft, makeCommand, uploadAsset } from '../src/editing/editApi.js'
 
@@ -88,6 +89,42 @@ afterEach(() => {
   vi.useRealTimers()
   history.replaceState(null, '', '/')
   localStorage.clear()
+})
+
+test('renders assistant Markdown and displays raw HTML as inert text', () => {
+  const answer = [
+    '## Result',
+    '**Bold** and `a < b`',
+    'Next line',
+    '',
+    '- **`clip`**',
+    '- Second clip',
+    '1. First step',
+    '2. Second step',
+    '',
+    '| Time | Evidence |',
+    '| --- | --- |',
+    '| `00:12` | **Blue** |',
+    '',
+    '<script>alert(1)</script>',
+    '<img src=x onerror="alert(2)">',
+    '&lt;img src=x onerror=alert(3)&gt;',
+  ].join('\n')
+  const wrapper = render(AgentTurn, { turn: { run_id: 'sending', message: '**User message**' }, result: { answer } })
+  const result = wrapper.get('.turn-answer')
+  expect(result.get('h2').text()).toBe('Result')
+  expect(result.get('p strong').text()).toBe('Bold')
+  expect(result.get('p code').text()).toBe('a < b')
+  expect(result.find('p br').exists()).toBe(true)
+  expect(result.get('ul li strong code').text()).toBe('clip')
+  expect(result.findAll('ol li').map(item => item.text())).toEqual(['First step', 'Second step'])
+  expect(result.findAll('th').map(cell => cell.text())).toEqual(['Time', 'Evidence'])
+  expect(result.get('tbody td strong').text()).toBe('Blue')
+  expect(result.find('script, img, [onerror]').exists()).toBe(false)
+  expect(result.text()).toContain('<script>alert(1)</script>')
+  expect(result.text()).toContain('<img src=x onerror="alert(2)">')
+  expect(result.text()).toContain('&lt;img src=x onerror=alert(3)&gt;')
+  expect(wrapper.get('.conversation-user p').text()).toBe('**User message**')
 })
 
 test('shows the three panes together, project controls and the live asset strip', async () => {
@@ -449,6 +486,12 @@ test('manual marks auto-create a scheme, poll a revision-pinned render, play it 
   await flushPromises()
   expect(button(wrapper, '成片预览').attributes('aria-pressed')).toBe('true')
   expect(monitor(wrapper).attributes('src')).toBe('/final.mp4')
+  const failedVideo = monitor(wrapper).element
+  Object.defineProperty(failedVideo, 'error', { value: { code: 4 } })
+  await monitor(wrapper).trigger('error')
+  await click(wrapper, '播放成片')
+  await flushPromises()
+  expect(monitor(wrapper).element).not.toBe(failedVideo)
   const download = wrapper.get('.render-bar a[download]')
   expect(download.text()).toBe('下载 MP4')
   expect(download.attributes()).toMatchObject({ href: '/final.mp4', download: 'cutsieve-r1.mp4' })

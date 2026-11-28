@@ -298,7 +298,7 @@ class AgentTools:
         )
 
     def search_evidence(self, row, args, call_id):
-        if not args.query and not args.image_artifact_id:
+        if not (args.query or "").strip() and not args.image_artifact_id:
             raise EditError(422, "EMPTY_QUERY", "Provide a text query, an image_artifact_id, or both.")
         assets = self.assets(row)
         if args.asset_id:
@@ -324,7 +324,7 @@ class AgentTools:
             ordered = self.verified_matches(row, call_id, request, plan, ranked, ordered, body)
         if not ordered:
             return tool_error("NO_EVIDENCE", "No indexed evidence matched the query.",
-                              "Try a shorter phrase, other wording, or inspect a relevant source interval.",
+                              "Try a shorter phrase or use inspect_frames for visuals without indexed matches.",
                               **{key: value for key, value in body.items() if key != "ok"})
         by_id = {item["evidence_id"]: item for item in plan.rows}
         pairs = [evidence_item(by_id[key], by_media[by_id[key]["media_revision_id"]])

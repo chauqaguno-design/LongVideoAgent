@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { renderArtifact, request } from './editApi.js'
 import { interval, label, pending } from './projectView.js'
+import { assistantMarkdown } from './assistantMarkdown.js'
 import ExportDownload from './ExportDownload.vue'
 import UsageMetrics from './UsageMetrics.vue'
 
@@ -33,7 +34,7 @@ const toolActions = {
 
 const status = computed(() => props.state?.status || props.turn.status)
 const live = computed(() => pending({ status: status.value }))
-const answer = computed(() => props.result?.answer || props.turn.answer)
+const answer = computed(() => assistantMarkdown(props.result?.answer || props.turn.answer || ''))
 const citations = computed(() => props.result?.citations || props.turn.citations || [])
 const previewId = computed(() => props.result?.preview_artifact_id || props.turn.preview_artifact_id)
 const exportId = computed(() => props.result?.export_artifact_id || props.turn.export_artifact_id)
@@ -181,7 +182,7 @@ onUnmounted(() => lifecycle.abort())
         <p>{{ item.question }}</p>
         <p>{{ item.reply }}</p>
       </div>
-      <p v-if="answer" class="turn-answer">{{ answer }}</p>
+      <div v-if="answer" class="turn-answer" v-html="answer"></div>
       <p v-if="state?.error" class="inline-error" role="alert">{{ state.error.message || state.error }}</p>
 
       <ul v-if="citations.length" class="citation-chips" aria-label="原片引用">

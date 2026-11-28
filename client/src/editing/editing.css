@@ -471,7 +471,7 @@
 }
 
 .conversation-user img { display: block; max-width: min(100%, 9rem); max-height: 6rem; border-radius: 5px; object-fit: contain; }
-.conversation-user p, .turn-answer, .clarified p { overflow-wrap: anywhere; white-space: pre-wrap; }
+.conversation-user p, .clarified p { overflow-wrap: anywhere; white-space: pre-wrap; }
 .conversation-response {
   display: grid;
   gap: 0.52rem;
@@ -500,7 +500,17 @@
 .tool-steps code { color: var(--cs-text); }
 .clarified { display: grid; gap: 0.15rem; padding-left: 0.5rem; border-left: 2px solid var(--cs-accent-border); color: var(--cs-text-secondary); }
 .clarified p:last-child { color: var(--cs-text); }
-.turn-answer { line-height: 1.67; }
+.turn-answer { line-height: 1.67; overflow-wrap: anywhere; min-width: 0; }
+.turn-answer > * { margin: 0; }
+.turn-answer > * + * { margin-top: .65em; }
+.turn-answer :is(h1, h2, h3, h4, h5, h6) { font-size: 1em; line-height: 1.4; }
+.turn-answer :is(h1, h2) { font-size: 1.15em; }
+.turn-answer :is(ul, ol) { padding-inline-start: 1.5em; }
+.turn-answer code { padding: .1em .35em; border-radius: 4px; background: #ffffff12; font-size: .9em; }
+.answer-table { overflow-x: auto; }
+.answer-table table { width: 100%; border-collapse: collapse; font-size: .92em; }
+.answer-table :is(th, td) { padding: .35em .65em; border: 1px solid #ffffff20; text-align: start; }
+.answer-table th { background: #ffffff0d; }
 .citation-chips { display: grid; gap: 0.28rem; min-width: 0; }
 .studio-workspace .citation-chip {
   display: flex;

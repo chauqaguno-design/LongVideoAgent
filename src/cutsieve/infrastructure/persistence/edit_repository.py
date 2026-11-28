@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from cutsieve.application.edit_timeline import EditError, apply_patch, empty_revision, invalid, missing, timestamp, uid
 from cutsieve.application.render_formats import EXPORT_FORMATS
-from cutsieve.infrastructure.edit_media import RENDERER_VERSION, output_frame
+from cutsieve.infrastructure.edit_media import output_frame, renderer_version
 from .edit_tables import events, jobs, projects, receipts, revisions
 from .work_outbox import emit
 
@@ -31,7 +31,7 @@ def caption_font(revision):
 
 
 def render_key(workspace, revision, profile, font, export_format="mp4"):
-    fields = [workspace, revision["revision_id"], profile, RENDERER_VERSION]
+    fields = [workspace, revision["revision_id"], profile, renderer_version(export_format)]
     if export_format != "mp4":
         fields.append(export_format)
     if font:
@@ -225,7 +225,7 @@ class EditRepository:
             db.execute(insert(jobs).values(id=job_id, workspace_id=workspace, edit_id=rev["edit_project_id"],
                        revision_id=revision_id, profile=body["profile"], cache_key=slot, cache_slot=slot,
                        attempt=0, lease_until=0, status="QUEUED", created_at=timestamp(),
-                       result=dict(renderer_version=RENDERER_VERSION, export_format=export_format, progress=0.0, error=None, artifact_id=None, validation_report_id=None,
+                       result=dict(renderer_version=renderer_version(export_format), export_format=export_format, progress=0.0, error=None, artifact_id=None, validation_report_id=None,
                                    compiled_manifest_artifact_id=None, cancel_requested_at=None)))
             emit(db,uid(),workspace,job_id,"render.queued")
             return job_id

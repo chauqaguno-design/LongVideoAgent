@@ -21,7 +21,11 @@ RENDERER_VERSION = "cutsieve-ffmpeg-v3"
 # FFmpeg encoder names, ffprobe codec names and the soft subtitle encoder.
 CODECS = {"mp4": ("libx264", "aac", "h264", "aac", "mov_text"),
           "mkv": ("libx264", "flac", "h264", "flac", "srt"),
-          "webm": ("libaom-av1", "libopus", "av1", "opus", "webvtt")}
+          "webm": ("libvpx-vp9", "libopus", "vp9", "opus", "webvtt")}
+
+
+def renderer_version(container):
+    return "cutsieve-webm-v4" if container == "webm" else RENDERER_VERSION
 
 
 def media_binaries(environ=None):
@@ -288,29 +292,40 @@ def _validate_output(target, manifest, ffmpeg, ffprobe, stopped, soft_cues):
                            "-of", "json", str(target)], stopped=stopped))
     video = next((s for s in raw["streams"] if s["codec_type"] == "video"), None)
     audio = next((s for s in raw["streams"] if s["codec_type"] == "audio"), None)
-    if not video or not audio:
-        raise ValueError("Output is missing a required video or audio stream")
+    if not video or bool(audio) != manifest.get("has_audio", True):
+        raise ValueError("Output streams differ from the compiled video and audio layout")
     _, _, video_codec, audio_codec, _ = CODECS[container]
+    video_codecs = {video_codec, "av1"} if container == "webm" else {video_codec}
     muxer = "mp4" if container == "mp4" else "matroska"
     if (muxer not in raw["format"]["format_name"].split(",") or
-            (video["codec_name"], audio["codec_name"]) != (video_codec, audio_codec)):
+            video["codec_name"] not in video_codecs or (audio and audio["codec_name"] != audio_codec)):
         raise ValueError("Output container or codecs differ from the export format")
+    if container == "webm":
+        expected = [("video", video["codec_name"])]
+        if audio:
+            expected.append(("audio", audio_codec))
+        if soft_cues:
+            expected.append(("subtitle", "webvtt"))
+        if [(s["codec_type"], s["codec_name"]) for s in raw["streams"]] != expected:
+            raise ValueError("Output contains unexpected WebM streams")
     p = manifest["output_profile"]
     fps = Fraction(p["fps_num"], p["fps_den"])
     frames = manifest["clips"][-1]["output_end_frame"]
     if ((video["width"], video["height"]) != (p["width"], p["height"]) or
             Fraction(video["avg_frame_rate"]) != fps or int(video.get("nb_frames") or video["nb_read_packets"]) != frames):
         raise ValueError("Encoded video disagrees with the compiled output grid")
-    if "duration_ts" in audio:
-        audio_seconds = int(audio["duration_ts"]) * Fraction(audio["time_base"])
-    else:
-        # Matroska stores stream end times as HH:MM:SS.nnnnnnnnn tags.
-        hours, minutes, seconds = audio["tags"]["DURATION"].split(":")
-        audio_seconds = int(hours) * 3600 + int(minutes) * 60 + Fraction(seconds)
-    if int(audio["sample_rate"]) != 48000 or abs(audio_seconds - frames / fps) > Fraction(1024, 48000):
-        raise ValueError("Output audio duration differs from the compiled timeline")
+    if audio:
+        if "duration_ts" in audio:
+            audio_seconds = int(audio["duration_ts"]) * Fraction(audio["time_base"])
+        else:
+            # Matroska stores stream end times as HH:MM:SS.nnnnnnnnn tags.
+            hours, minutes, seconds = audio["tags"]["DURATION"].split(":")
+            audio_seconds = int(hours) * 3600 + int(minutes) * 60 + Fraction(seconds)
+        if int(audio["sample_rate"]) != 48000 or abs(audio_seconds - frames / fps) > Fraction(1024, 48000):
+            raise ValueError("Output audio duration differs from the compiled timeline")
+    audio_map = ["-map", "0:a:0"] if audio else []
     _run([ffmpeg, "-nostdin", "-v", "error", "-xerror", "-threads","2", "-i", str(target),
-          "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-"], stopped=stopped)
+          "-map", "0:v:0", *audio_map, "-f", "null", "-"], stopped=stopped)
     if soft_cues:
         if not any(s["codec_type"] == "subtitle" for s in raw["streams"]):
             raise ValueError("Output is missing its compiled subtitle track")
@@ -352,6 +367,14 @@ def render_timeline(revision, sources, output, *, job_id, profile="PREVIEW",
     output = Path(output).resolve()
     container = output.suffix[1:].lower()
     video_encoder, audio_encoder, _, _, subtitle_encoder = CODECS[container]
+    has_audio = True
+    if container == "webm":
+        # A silent Opus track still counts as audio for browser autoplay.
+        has_audio = any(cut.clip["audio_policy"] == "keep" for cut in cuts)
+        manifest.update(renderer_version=renderer_version(container), has_audio=has_audio)
+        encoders = _run([ffmpeg, "-hide_banner", "-encoders"], stopped=stopped)
+        if not re.search(r"\blibvpx-vp9\b", encoders):
+            video_encoder = "libaom-av1"
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=output.parent) as tmp:
         stage = Path(tmp)
@@ -365,12 +388,14 @@ def render_timeline(revision, sources, output, *, job_id, profile="PREVIEW",
                 args.extend(["-ss", _seconds(Fraction(seek, US)), "-noaccurate_seek"])
             args.extend([*SOURCE_FLAGS, "-threads", "2", "-i", str(cut.source)])
             graph.append(f"[{i}:{cut.meta['video_index']}]" + _video_filters(cut, p, fps) + f"[v{i}]")
-            graph.append(_audio_filters(cut, i, fps) + f"[a{i}]")
+            if has_audio:
+                graph.append(_audio_filters(cut, i, fps) + f"[a{i}]")
         n = len(cuts)
         videos = "".join(f"[v{i}]" for i in range(n))
-        audios = "".join(f"[a{i}]" for i in range(n))
         video = f"{videos}concat=n={n}:v=1:a=0,settb={fps.denominator}/{fps.numerator},setpts=N"
-        graph.append(f"{audios}concat=n={n}:v=0:a=1,asetpts=N/SR/TB[aout]")
+        if has_audio:
+            audios = "".join(f"[a{i}]" for i in range(n))
+            graph.append(f"{audios}concat=n={n}:v=0:a=1,asetpts=N/SR/TB[aout]")
         if cues:
             write_srt(stage / "cues.srt", cues)
         if policy == "burn_aligned":
@@ -388,14 +413,17 @@ def render_timeline(revision, sources, output, *, job_id, profile="PREVIEW",
         (stage / "graph.txt").write_text(";\n".join(graph), encoding="utf8")
         if cues and policy == "preserve_source":
             args.extend(["-i", "cues.srt"])
-        args.extend([graph_flag, "graph.txt", "-map", "[vout]", "-map", "[aout]"])
+        args.extend([graph_flag, "graph.txt", "-map", "[vout]"])
+        if has_audio:
+            args.extend(["-map", "[aout]", "-c:a", audio_encoder, "-ar", "48000", "-ac", "2"])
         if cues and policy == "preserve_source":
             args.extend(["-map", f"{n}:s:0", "-c:s", subtitle_encoder])
         filename = "output." + container
         args.extend(["-map_metadata", "-1", "-metadata:s:v:0", "rotate=0", "-c:v", video_encoder,
-                     "-pix_fmt", "yuv420p", "-r", str(fps), "-c:a", audio_encoder, "-ar", "48000", "-ac", "2"])
+                     "-pix_fmt", "yuv420p", "-r", str(fps)])
         if container == "webm":
-            args.extend(["-cpu-used", "8", "-crf", "32", "-b:v", "0"])
+            args.extend(["-f", "webm", "-cpu-used", "4" if video_encoder == "libvpx-vp9" else "8",
+                         "-crf", "32", "-b:v", "0"])
         else:
             args.extend(["-preset", "veryfast" if profile == "PREVIEW" else "medium",
                          "-crf", "26" if profile == "PREVIEW" else "18"])

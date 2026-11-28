@@ -118,12 +118,12 @@ def test_vfr_and_rotation_crop(tmp_path, tools):
         compile_timeline(rev,{mid:rotated},job_id=uid(),profile="EXPORT",ffprobe=tools["ffprobe"])
 
 
-@pytest.mark.parametrize("container", ["mp4", "webm", "mkv"])
-def test_overlapping_soft_captions_survive_mux_and_validation(tmp_path, movies, tools, container):
+@pytest.mark.parametrize(("container", "audio"), [("mp4", "keep"), ("webm", "keep"), ("webm", "mute"), ("mkv", "keep")])
+def test_overlapping_soft_captions_survive_mux_and_validation(tmp_path, movies, tools, container, audio):
     from cutsieve.infrastructure.edit_captions import parse_srt
 
     mid, track = uid(), uid()
-    cut = dict(clip(mid, 0, 1_000_000), caption_track_id=track)
+    cut = dict(clip(mid, 0, 1_000_000, audio), caption_track_id=track)
     rev = dict(revision([cut]), caption_policy="preserve_source")
     target = tmp_path / ("overlap." + container)
     cues = [Cue(100000, 600000, "ALPHA"), Cue(400000, 700000, "BETA")]

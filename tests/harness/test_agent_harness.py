@@ -118,6 +118,57 @@ def test_search_answer_across_available_assets_and_direct_image_input(
 
 
 @pytest.mark.real_media
+def test_chinese_visual_search_uses_indexed_observations_and_sampled_frames(
+    tmp_path, fake_agent, sample_video, upload_video, wait_state, monkeypatch,
+):
+    monkeypatch.delenv("CUTSIEVE_SEARCH_ENCODER_URL", raising=False)
+    tool, reply = fake_agent.tool, fake_agent.reply
+    app = create_app(work_dir=tmp_path, agent_transport=fake_agent)
+    with TestClient(app) as client:
+        project = create_project(client)
+        asset = upload_video(client, project, sample_video)
+        workspace, mid = asset["workspace_id"], asset["media_revision_id"]
+        blue = tmp_path / "blue.jpg"
+        Image.new("RGB", (64, 48), "blue").save(blue)
+
+        def evidence(source, claim, **fields):
+            return dict(workspace_id=workspace, project_id=project, media_revision_id=mid,
+                        source=source, claim=claim, evidence_id=str(uuid4()), support="SUPPORTED",
+                        range=dict(start_us=500_000, end_us=500_001), **fields)
+
+        frame = evidence("sampled-frame", "原片采样画面", path=blue,
+                         frame=dict(actual_us=500_000, sha256=hashlib.sha256(blue.read_bytes()).hexdigest()))
+        frame["support"] = "NOT_CHECKED"
+        rows = [frame, dict(frame, path=tmp_path / "missing.jpg", evidence_id=str(uuid4()))]
+        monkeypatch.setattr(app.state.processing.catalog, "search_scope", lambda *a, **kw: ("generation", rows))
+
+        def query_indexed(request):
+            hits = last_tool(request, "frames")["hits"]
+            assert [(h["source"], h["start_us"]) for h in hits] == [("sampled-frame", 500_000)]
+            rows.extend([
+                evidence("embedded-subtitle", "蓝色的字幕"),
+                evidence("faster-whisper", "蓝色的对白"),
+                evidence("paddleocr", "蓝色的屏幕文字"),
+                evidence("flash", "蓝色画面"),
+            ])
+            return reply(tool("indexed", "search_evidence", dict(query="蓝色画面")))
+
+        def answer(request):
+            hits = last_tool(request, "indexed")["hits"]
+            assert {h["source"] for h in hits} == {
+                "embedded-subtitle", "faster-whisper", "paddleocr", "flash", "sampled-frame",
+            }
+            return reply(text="找到蓝色画面。")
+
+        fake_agent.responses = [
+            reply(tool("frames", "search_evidence", dict(query="找到蓝色画面的那一段"))),
+            query_indexed, answer,
+        ]
+        path, _ = start_chat(client, project, "找到蓝色画面的那一段")
+        wait_state(client, path)
+
+
+@pytest.mark.real_media
 def test_multimodal_tool_message_then_atomic_edit_and_parent_inheritance(
     tmp_path, fake_agent, sample_video, upload_video, wait_state, workflow_events,
 ):

@@ -1,5 +1,6 @@
 """CPU screenshot retrieval using a versioned spatial colour descriptor."""
 
+from colorsys import rgb_to_hsv
 from functools import lru_cache
 from io import BytesIO
 
@@ -46,3 +47,14 @@ def frame_descriptors(path, digest):
 def similarity(query, variants):
     distance = min(sum(abs(a - b) for a, b in zip(query, sample)) for sample in variants)
     return 1 - distance / (len(query) * 255)
+
+
+def hue_coverage(rgb, center, radius):
+    """Measure the fraction of a frame occupied by a sufficiently saturated hue."""
+    matching = 0
+    for r, g, b in zip(rgb[::3], rgb[1::3], rgb[2::3]):
+        hue, saturation, value = rgb_to_hsv(r, g, b)
+        distance = abs(hue * 360 - center)
+        if saturation >= 0.35 and value >= 40 and min(distance, 360 - distance) <= radius:
+            matching += 1
+    return matching / (len(rgb) // 3)

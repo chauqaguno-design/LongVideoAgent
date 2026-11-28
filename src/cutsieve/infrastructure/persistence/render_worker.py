@@ -127,8 +127,9 @@ class RenderWorker:
             return db.scalar(select(jobs.c.id).where(attempt(row))) is not None
 
     def produce(self, row, stopped=None):
-        from cutsieve.infrastructure.edit_media import RENDERER_VERSION, render_timeline
-        if row.result.get("renderer_version", "cutsieve-ffmpeg-v1") != RENDERER_VERSION:
+        from cutsieve.infrastructure.edit_media import render_timeline, renderer_version
+        export_format = row.result.get("export_format", "mp4")
+        if row.result.get("renderer_version", "cutsieve-ffmpeg-v1") != renderer_version(export_format):
             raise EditError(409, "RENDERER_CHANGED", "渲染器版本已变更，请为相同时间线重新生成")
         rev = self.repo.get(revisions, row.workspace_id, row.revision_id, lambda r: r.snapshot)
         sources = {mid: self.repo.sources.source_path(row.workspace_id, mid)
@@ -140,7 +141,6 @@ class RenderWorker:
                 if track and track not in tracks:
                     tracks[track] = self.repo.resolve_track(row.workspace_id, clip["media_revision_id"], track)
         font = caption_font(rev)
-        export_format = row.result.get("export_format", "mp4")
         if font and render_key(row.workspace_id, rev, row.profile, font, export_format) != row.cache_key:
             raise ValueError("字幕字体已更改，请重新提交渲染")
         # An expired attempt can never overwrite a newer attempt's files.

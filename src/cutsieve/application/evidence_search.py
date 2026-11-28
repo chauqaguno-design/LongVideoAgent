@@ -13,8 +13,7 @@ from fastapi import HTTPException
 from cutsieve.application.instruction_text import QUOTES, quoted_literal
 from cutsieve.application.rank_fusion import RankedCandidate, reciprocal_rank_fusion
 from cutsieve.application.media_sampling import segment_bounds
-from cutsieve.application.sparse_retrieval import normalize_text
-from cutsieve.application.sparse_retrieval import BM25Retriever
+from cutsieve.application.sparse_retrieval import BM25Retriever, normalize_text
 from cutsieve.application.edit_timeline import EditError
 from cutsieve.infrastructure.persistence.edit_repository import EditRepository
 from cutsieve.infrastructure.search_artifacts import SearchArtifacts
@@ -22,6 +21,7 @@ from cutsieve.infrastructure.search_features import (
     PIXEL_SPACE,
     descriptor,
     frame_descriptors,
+    hue_coverage,
     read_query_image,
     similarity,
 )
@@ -88,6 +88,23 @@ def query_literal(text):
 
 
 SUBTITLE_PROTOCOL = "embedded-subtitle-literal-v1"
+
+SCENE_COLOR = re.compile(
+    r"(蓝|红|绿|黄|橙|紫)色(?:的?(?:画面|场景|镜头|片段)|$)"
+    r"|\b(blue|red|green|yellow|orange|purple)(?:\s+(?:scene|screen|frames?|shot)\b|$)"
+)
+HUES = {
+    alias: hue
+    for aliases, hue in [
+        (("蓝", "blue"), (220, 32)),
+        (("红", "red"), (0, 16)),
+        (("绿", "green"), (120, 44)),
+        (("黄", "yellow"), (56, 12)),
+        (("橙", "orange"), (32, 14)),
+        (("紫", "purple"), (282, 30)),
+    ]
+    for alias in aliases
+}
 
 
 def subtitle_literal(request):
@@ -283,6 +300,11 @@ class EvidenceSearch:
             self.encoder.rank(text, image, rows, routes, warnings)
         elif text:
             warnings.append("语义编码器未配置，本次文字召回使用词法索引")
+        if not image_id and not query_literal(text) and (color := SCENE_COLOR.search(normalize_text(text))):
+            center, radius = HUES[color.group(1) or color.group(2)]
+            ranked = self.color_frames(rows, center, radius, warnings)
+            if ranked:
+                routes["frame_color"] = ("sampled-frame-hue-v1", ranked)
         # One source occurrence may be present in several overlapping segments.
         representatives, by_source = {}, {}
         for i, row in enumerate(rows):
@@ -344,6 +366,22 @@ class EvidenceSearch:
             verification_workflow_id=None,
             result_artifact_id=None,
         )
+
+    @staticmethod
+    def color_frames(rows, center, radius, warnings):
+        ranked = []
+        for index, row in enumerate(rows):
+            if row["source"] != "sampled-frame" or not row.get("path") or not row.get("frame"):
+                continue
+            try:
+                pixels = frame_descriptors(str(row["path"]), row["frame"]["sha256"])[0]
+            except (OSError, ValueError, KeyError):
+                warnings.append("部分已索引帧的文件暂时不可读")
+                continue
+            score = hue_coverage(pixels, center, radius)
+            if score >= 0.25:
+                ranked.append(RankedCandidate(index, score))
+        return sorted(ranked, key=lambda candidate: (-candidate.score, candidate.index))
 
     def search(self, workspace, request, *, generation_id=None):
         plan = self.plan(workspace, request, generation_id=generation_id)
