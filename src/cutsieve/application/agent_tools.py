@@ -4,14 +4,17 @@ import json
 import subprocess
 from base64 import b64encode
 from dataclasses import dataclass, field
+from fractions import Fraction
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated, Literal
 
+from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
-from cutsieve.infrastructure.edit_media import US, media_binaries, probe_media
+from cutsieve.infrastructure.edit_media import US, media_binaries, output_frame, probe_media
 from cutsieve.infrastructure.media.process import MediaStopped
 from cutsieve.infrastructure.media.source_artifacts import SourceReader
 from cutsieve.infrastructure.persistence.edit_repository import one, owned
@@ -21,7 +24,7 @@ from cutsieve.infrastructure.persistence.source_tables import sources
 from cutsieve.infrastructure.persistence.workflow_repository import StaleLease
 
 from .edit_sources import asset_view
-from .edit_timeline import EditError, missing
+from .edit_timeline import AudioFadeMs, EditError
 from .evidence_search import subtitle_literal
 from .spec_contracts import Nonnegative, ResourceId, TimeUs
 from .workflow_checkpoint import Citation, PendingAsk, PendingRender
@@ -58,6 +61,9 @@ class Transcript(Arguments):
 
 class Frames(MediaOverview):
     artifact_id: ResourceId | None = None
+    edit_project_id: ResourceId | None = None
+    contact_sheet: bool = False
+    cut_points: bool = False
     timestamps_s: Annotated[list[Seconds], Field(min_length=1, max_length=6)] | None = None
     start_s: Seconds | None = None
     end_s: Seconds | None = None
@@ -116,6 +122,11 @@ class SetCaptionPolicy(Arguments):
     caption_policy: CaptionPolicy
 
 
+class SetAudioFade(Arguments):
+    op: Literal["set_audio_fade"]
+    audio_fade_ms: AudioFadeMs
+
+
 class RestoreRevision(Arguments):
     op: Literal["restore_revision"]
     source_revision_id: ResourceId | None = None
@@ -123,7 +134,7 @@ class RestoreRevision(Arguments):
 
 
 Operation = Annotated[
-    AppendClip | ReplaceClip | RemoveClip | ReorderClips | SetCaptionPolicy | RestoreRevision,
+    AppendClip | ReplaceClip | RemoveClip | ReorderClips | SetCaptionPolicy | SetAudioFade | RestoreRevision,
     Field(discriminator="op"),
 ]
 
@@ -132,6 +143,7 @@ class TimelineEdit(EditTarget):
     clips: Annotated[list[ClipDraft], Field(max_length=200)] | None = None
     operations: Annotated[list[Operation], Field(min_length=1, max_length=100)] | None = None
     caption_policy: CaptionPolicy | None = None
+    audio_fade_ms: AudioFadeMs | None = None
     title: Annotated[str, Field(min_length=1, max_length=160)] | None = None
     expected_revision: Nonnegative | None = None
 
@@ -152,12 +164,14 @@ TOOLS = {
                         "FIRST requires a single asset. Distinguish candidates from verified occurrences."),
     "read_transcript": (Transcript, "Read aligned subtitles, ASR, OCR and visual observations in source seconds. "
                         "Use the returned next arguments for more rows or the next 180-second window."),
-    "inspect_frames": (Frames, "Read 1 to 6 JPEG frames from one source asset or one rendered artifact. "
-                       "Choose explicit timestamps or an interval and count, in seconds."),
+    "inspect_frames": (Frames, "Read 1 to 6 JPEG frames from a source or render. "
+                       "Use timestamps or an interval in seconds, or cut_points for a render/timeline. "
+                       "Set contact_sheet=true to combine frames into one labeled image."),
     "get_timeline": (TimelineQuery, "Read the active or latest timeline, clip IDs and its optimistic head revision."),
     "edit_timeline": (TimelineEdit, "Replace all clips with clips, or apply operations, in one revision. "
                       "A clip uses start_s and end_s (or source_start_us and source_end_us) and its source asset "
-                      "or media revision. Read the timeline again if its expected revision conflicts."),
+                      "or media revision. Omit the source ID for a single source. "
+                      "Use the recovery details to correct a failed edit."),
     "render_video": (Render, "Render the current non-empty timeline. PREVIEW uses mp4. "
                      "EXPORT supports mp4, webm and mkv. Returns when the job finishes."),
     "ask_user": (Ask, "Pause only when a decision genuinely needs user input. Offer concrete selectable options."),
@@ -245,7 +259,9 @@ class AgentTools:
         if not asset_id and not media_revision_id and len(assets) != 1:
             raise EditError(422, "ASSET_REQUIRED", "Select one available asset by asset_id or media_revision_id.")
         for asset in assets:
-            if (not asset_id or asset.id == asset_id) and (not media_revision_id or asset.revision == media_revision_id):
+            if (not asset_id or asset_id in (asset.id, asset.revision)) and (
+                not media_revision_id or asset.revision == media_revision_id
+            ):
                 return asset
         raise EditError(404, "ASSET_NOT_FOUND", "The requested asset and media revision are not available in this turn.")
 
@@ -382,27 +398,45 @@ class AgentTools:
         )
 
     def inspect_frames(self, row, args):
-        if args.asset_id and args.artifact_id:
-            raise EditError(422, "INVALID_TOOL_ARGUMENTS", "Specify one asset_id or one artifact_id.")
-        asset, related = None, []
+        if sum(bool(key) for key in (args.asset_id, args.artifact_id, args.edit_project_id)) > 1:
+            raise EditError(422, "INVALID_TOOL_ARGUMENTS", "Specify one asset, render artifact or edit project.")
+        if args.cut_points and (args.asset_id or any(
+            value is not None for value in (args.timestamps_s, args.start_s, args.end_s)
+        )):
+            raise EditError(422, "INVALID_TOOL_ARGUMENTS", "Use cut_points with a render or timeline and optional count.")
+        if args.edit_project_id and not args.cut_points:
+            raise EditError(422, "INVALID_TOOL_ARGUMENTS", "Use cut_points to inspect an edit project.")
+        asset, revision, related = None, None, []
         workspace = row.workspace_id
         if args.artifact_id:
             artifact = self.render_worker.artifact_record(workspace, args.artifact_id)
             if artifact.kind not in ("PREVIEW", "EXPORT"):
                 raise EditError(422, "NOT_A_VIDEO", "Select a rendered PREVIEW or EXPORT video artifact.")
             with self.repo.sessions() as db:
-                revision = one(db, owned(revisions, workspace, artifact.revision_id))
-                one(db, owned(projects, workspace, revision.edit_id).where(projects.c.project_id == row.project_id))
-            related = [c["media_revision_id"] for c in revision.snapshot["clips"]]
+                record = one(db, owned(revisions, workspace, artifact.revision_id))
+                one(db, owned(projects, workspace, record.edit_id).where(projects.c.project_id == row.project_id))
+            revision = record.snapshot
             path = self.render_worker.materialize(artifact)
-            target = dict(artifact_id=artifact.id, edit_project_id=revision.edit_id, revision_id=revision.id)
+            target = dict(artifact_id=artifact.id, edit_project_id=record.edit_id, revision_id=record.id)
+        elif args.cut_points:
+            with self.repo.sessions() as db:
+                project, revision = self.timeline(db, row, args.edit_project_id)
+            if not revision or not revision["clips"]:
+                raise EditError(422, "EMPTY_TIMELINE", "Add clips before inspecting timeline cut points.")
+            target = dict(edit_project_id=project.id, revision_id=revision["revision_id"])
         else:
             asset = self.asset(self.assets(row), args.asset_id)
             path = self.repo.sources.source_path(workspace, asset.revision)
             target = dict(asset_id=asset.id, media_revision_id=asset.revision)
+        if revision:
+            related = [c["media_revision_id"] for c in revision["clips"]]
+            with self.repo.sessions() as db:
+                self.repo.sources.require_readable(db, workspace, related)
         remaining = row.checkpoint.usage.max_images - row.checkpoint.usage.images
-        requested = len(args.timestamps_s) if args.timestamps_s else (args.count or 3)
-        if requested > remaining:
+        requested = len(args.timestamps_s) if args.timestamps_s else (args.count or (6 if args.cut_points else 3))
+        if args.cut_points:
+            requested = min(requested, max(1, 2 * (len(revision["clips"]) - 1)))
+        if (1 if args.contact_sheet else requested) > remaining:
             return tool_error(
                 "MAX_IMAGES_EXCEEDED", "The requested frames exceed the remaining image allowance.",
                 "Request fewer frames or use available transcript and timeline evidence.", remaining_images=remaining,
@@ -410,32 +444,55 @@ class AgentTools:
         tools = media_binaries()
         stopped = FrameStop(self.repo, row)
         try:
-            meta = asset.probe if asset else probe_media(path, ffprobe=tools["ffprobe"], stopped=stopped)
-            times = frame_times(args, meta["duration_us"], requested)
-            reader = SourceReader(path, meta, tools, stopped)
-            frames, images, citations, seen = [], [], [], set()
+            timeline_only = args.cut_points and not args.artifact_id
+            if timeline_only:
+                samples = cut_samples(revision, requested)
+                readers = {}
+            else:
+                meta = asset.probe if asset else probe_media(path, ffprobe=tools["ffprobe"], stopped=stopped)
+                times = ([at for at, _, _ in cut_samples(revision, requested, rendered=True)
+                          if at < meta["duration_us"]] if args.cut_points else
+                         frame_times(args, meta["duration_us"], requested))
+                samples = [(at, at, None) for at in times]
+                reader = SourceReader(path, meta, tools, stopped)
+            frames, jpegs, citations, seen = [], [], [], set()
             with TemporaryDirectory() as folder:
-                for when in times:
+                for requested_at, when, media_id in samples:
+                    if timeline_only:
+                        if media_id not in readers:
+                            source = self.repo.sources.source_path(workspace, media_id)
+                            source_meta = probe_media(source, ffprobe=tools["ffprobe"], stopped=stopped)
+                            readers[media_id] = SourceReader(source, source_meta, tools, stopped)
+                        reader = readers[media_id]
                     pts = reader.frame_pts(when)
-                    if pts in seen:
+                    key = (requested_at if timeline_only else None, pts)
+                    if key in seen:
                         continue
-                    seen.add(pts)
+                    seen.add(key)
                     jpg = Path(folder) / "frame.jpg"
                     actual = reader.save_frame(pts, jpg, max_width=768)
-                    images.append(image_part("image/jpeg", jpg.read_bytes()))
-                    frames.append(dict(requested_s=when / US, timestamp_s=actual / US, timestamp_us=actual))
+                    jpegs.append(jpg.read_bytes())
+                    display = max(0, requested_at + actual - when)
+                    frame = dict(requested_s=requested_at / US, timestamp_s=display / US, timestamp_us=display)
+                    if timeline_only:
+                        frame.update(media_revision_id=media_id, source_timestamp_s=actual / US)
+                    frames.append(frame)
                     if asset:
                         citations.append(citation(asset, actual, actual + 1, "Inspected video frame", "ffmpeg-frame"))
         except MediaStopped as exc:
             raise StaleLease() from exc
         except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             raise EditError(422, "FRAME_EXTRACTION_FAILED", "FFmpeg could not decode frames from the selected video.") from exc
-        return ToolResult(dict(ok=True, frames=frames, **target), citations, images, related_media=related)
+        sheet = args.contact_sheet and len(jpegs) >= 2
+        if sheet:
+            jpegs = [contact_sheet(jpegs, [frame["timestamp_us"] for frame in frames])]
+        return ToolResult(dict(ok=True, frames=frames, contact_sheet=sheet, **target), citations,
+                          [image_part("image/jpeg", jpeg) for jpeg in jpegs], related_media=related)
 
-    def timeline(self, db, row, edit_id=None):
+    def timeline(self, db, row, edit_id=None, *, use_checkpoint=True):
         workspace = row.workspace_id
         base = select(projects).where(projects.c.workspace_id == workspace, projects.c.project_id == row.project_id)
-        edit_id = edit_id or row.checkpoint.edit_project_id
+        edit_id = edit_id or (row.checkpoint.edit_project_id if use_checkpoint else None)
         if edit_id:
             project = one(db, base.where(projects.c.id == edit_id))
         else:
@@ -459,6 +516,7 @@ class AgentTools:
         return dict(
             edit_project_id=project.id, title=project.title, head_revision_id=revision["revision_id"],
             head_revision_no=revision["revision_no"], caption_policy=revision["caption_policy"],
+            audio_fade_ms=revision.get("audio_fade_ms", 0),
             total_duration_s=revision["total_duration_us"] / US,
             clips=[
                 dict(clip_id=c["clip_id"], asset_id=by_media[c["media_revision_id"]],
@@ -486,8 +544,8 @@ class AgentTools:
     def edit_timeline(self, db, row, args, call_id):
         if args.clips is not None and args.operations is not None:
             raise EditError(422, "INVALID_TOOL_ARGUMENTS", "Choose clips or operations for the timeline edit.")
-        if args.clips is None and args.operations is None and args.caption_policy is None:
-            raise EditError(422, "INVALID_TOOL_ARGUMENTS", "Provide clips or operations, or set only the caption policy.")
+        if all(value is None for value in (args.clips, args.operations, args.caption_policy, args.audio_fade_ms)):
+            raise EditError(422, "INVALID_TOOL_ARGUMENTS", "Provide clips, operations, or a timeline setting.")
         workspace, cp = row.workspace_id, row.checkpoint
         project, revision = self.timeline(db, row, args.edit_project_id)
         if project is None:
@@ -522,19 +580,53 @@ class AgentTools:
             operations.append(operation)
         if args.caption_policy is not None:
             operations.append(dict(op="set_caption_policy", caption_policy=args.caption_policy))
+        if args.audio_fade_ms is not None:
+            operations.append(dict(op="set_audio_fade", audio_fade_ms=args.audio_fade_ms))
         result = self.repo.edits.patch(workspace, project.id, dict(
             expected_revision=expected, operations=operations, reason="Agent timeline edit",
             idempotency_key=stable_id(row.id, f"edit:{call_id}"),
         ), session=db)
         next_revision = one(db, owned(revisions, workspace, result["revision_id"])).snapshot
-        self.bind_timeline(db, row, project, next_revision)
+        view = self.timeline_view(db, row, project, next_revision)
         change = {key: result[key] for key in ("edit_project_id", "revision_id", "revision_no")}
         return ToolResult(
             dict(ok=True, **change, clip_count=len(next_revision["clips"]),
-                 total_duration_s=next_revision["total_duration_us"] / US,
+                 duration_s=view["total_duration_s"], total_duration_s=view["total_duration_s"],
+                 audio_fade_ms=view["audio_fade_ms"], clips=[
+                     dict(clip_id=c["clip_id"], asset_id=c["asset_id"], start_s=c["start_s"],
+                          end_s=c["end_s"], mute=c["audio_policy"] == "mute")
+                     for c in view["clips"]
+                 ],
                  clip_id_assignments=result["clip_id_assignments"]),
             notices=[("TIMELINE_UPDATED", change)],
         )
+
+    def edit_recovery(self, db, row, edit_id):
+        details = dict(valid_assets=[
+            dict(asset_id=a.id, media_revision_id=a.revision, filename=a.filename,
+                 duration_s=a.probe["duration_us"] / US)
+            for a in self.assets(row, db=db)
+        ])
+        try:
+            project, revision = self.timeline(db, row, edit_id)
+        except EditError as exc:
+            if exc.code != "NOT_FOUND":
+                raise
+            project, revision = self.timeline(db, row, use_checkpoint=False)
+        if project:
+            details.update(edit_project_id=project.id, head_revision_no=project.head)
+            if revision["clips"]:
+                by_media = dict(db.execute(select(sources.c.revision, sources.c.id).where(
+                    sources.c.workspace == row.workspace_id, sources.c.project == row.project_id,
+                    sources.c.revision.in_([c["media_revision_id"] for c in revision["clips"]]),
+                )).all())
+                details["current_clips"] = [
+                    dict(clip_id=c["clip_id"], asset_id=by_media.get(c["media_revision_id"]),
+                         start_s=c["source_start_us"] / US, end_s=c["source_end_us"] / US,
+                         mute=c["audio_policy"] == "mute")
+                    for c in revision["clips"]
+                ]
+        return details
 
     def clip(self, assets, draft):
         asset = self.asset(assets, draft.asset_id, draft.media_revision_id)
@@ -572,7 +664,7 @@ class AgentTools:
         )
 
     def render_result(self, row, pending, job):
-        info = pending.model_dump(exclude={"tool_call_id"})
+        info = pending.model_dump(exclude={"tool_call_id", "started_at_ms"})
         info.update(status=job["status"], artifact_id=job["artifact_id"], duration_s=None, mime_type=None)
         if job["status"] != "SUCCEEDED":
             error = job["error"] or {}
@@ -607,3 +699,47 @@ def frame_times(args, duration, count):
     if not 0 <= start < end <= duration:
         raise EditError(422, "INVALID_RANGE", f"Frame interval must satisfy 0 <= start < end <= {duration / US:g}s.")
     return [start + (end - start) * (2 * i + 1) // (2 * count) for i in range(count)]
+
+
+def cut_samples(revision, count, *, rendered=False):
+    profile = revision["output_profile"]
+    fps = Fraction(profile["fps_num"], profile["fps_den"])
+    clips = revision["clips"]
+    offsets = [0]
+    for clip in clips:
+        offsets.append(offsets[-1] + clip["source_end_us"] - clip["source_start_us"])
+    if rendered:
+        offsets = [round(output_frame(at, fps) * US / fps) for at in offsets]
+    if len(clips) == 1:
+        times = [(0, offsets[-1] // 2)]
+    else:
+        times = []
+        pad = max(125_000, round(US / fps))
+        joins = len(clips) - 1
+        pairs = min(joins, (count + 1) // 2)
+        for j in range(pairs):
+            i = 1 + (2 * j + 1) * joins // (2 * pairs)
+            cut = offsets[i]
+            times.extend(((i - 1, max(offsets[i - 1], cut - pad)),
+                          (i, min(offsets[i + 1] - 1, cut + pad))))
+    return [(at, clips[i]["source_start_us"] + at - offsets[i], clips[i]["media_revision_id"])
+            for i, at in times[:count]]
+
+
+def contact_sheet(jpegs, timestamps):
+    width, height = 384, 216
+    grid = Image.new("RGB", (width * 2, height * ((len(jpegs) + 1) // 2)), "#111827")
+    draw = ImageDraw.Draw(grid)
+    font = ImageFont.load_default(size=18)
+    for i, (jpeg, stamp) in enumerate(zip(jpegs, timestamps)):
+        x, y = (i % 2) * width, (i // 2) * height
+        with Image.open(BytesIO(jpeg)) as tile:
+            tile.thumbnail((width - 4, height - 4), Image.Resampling.LANCZOS)
+            grid.paste(tile, (x + (width - tile.width) // 2, y + (height - tile.height) // 2))
+        minutes, tenths = divmod(round(stamp / 100_000), 600)
+        label = f"{minutes:02d}:{tenths / 10:04.1f}"
+        draw.rounded_rectangle((x + 8, y + 8, x + 100, y + 35), radius=5, fill="#101418")
+        draw.text((x + 14, y + 12), label, fill="white", font=font)
+    with BytesIO() as output:
+        grid.save(output, format="JPEG", quality=85)
+        return output.getvalue()

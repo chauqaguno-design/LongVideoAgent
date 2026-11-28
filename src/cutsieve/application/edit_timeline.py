@@ -1,7 +1,12 @@
 """Apply an ordered, atomic patch to a copy of an immutable timeline."""
 from copy import deepcopy
 from datetime import datetime, timezone
+from typing import Annotated
 from uuid import uuid4
+
+from pydantic import Field
+
+AudioFadeMs = Annotated[int, Field(ge=0, le=3000)]
 
 
 def uid():
@@ -29,11 +34,16 @@ def missing():
 def empty_revision(workspace, edit_id, profile):
     return dict(revision_id=uid(), edit_project_id=edit_id, workspace_id=workspace, revision_no=0,
                 parent_revision_id=None, created_at=timestamp(), output_profile=profile, clips=[],
-                caption_policy="none", total_duration_us=0, source_brief_id=None)
+                caption_policy="none", audio_fade_ms=0, total_duration_us=0, source_brief_id=None)
+
+
+def revision_view(row):
+    return {"audio_fade_ms": 0, **row.snapshot}
 
 
 def apply_patch(parent, operations, load_revision, validate_clip):
     result = deepcopy(parent)
+    result.setdefault("audio_fade_ms", 0)
     assignments = []
     for index, operation in enumerate(operations):
         op = operation["op"]
@@ -60,10 +70,16 @@ def apply_patch(parent, operations, load_revision, validate_clip):
             result["output_profile"] = operation["output_profile"]
         elif op == "set_caption_policy":
             result["caption_policy"] = operation["caption_policy"]
+        elif op == "set_audio_fade":
+            fade = operation["audio_fade_ms"]
+            if type(fade) is not int or not 0 <= fade <= 3000:
+                raise invalid("audio_fade_ms must be an integer from 0 to 3000")
+            result["audio_fade_ms"] = fade
         elif op == "restore_revision":
             previous = load_revision(operation["source_revision_id"])
             for field in ("clips", "output_profile", "caption_policy", "source_brief_id"):
                 result[field] = deepcopy(previous[field])
+            result["audio_fade_ms"] = previous.get("audio_fade_ms", 0)
         else:
             raise invalid("未知的编辑操作")
     if len(result["clips"]) > 200:

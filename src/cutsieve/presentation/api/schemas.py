@@ -6,6 +6,8 @@ from typing import Annotated, Literal, NotRequired
 
 from pydantic import Field
 
+from cutsieve.application.edit_timeline import AudioFadeMs
+
 from cutsieve.application.spec_contracts import (
     Message, Nonnegative, OutputProfile, RequestBody, ResourceId, Scope, SearchRequest, TimeUs,
 )
@@ -93,6 +95,11 @@ class SetCaptionPolicy(RequestBody):
     caption_policy: Literal["none", "preserve_source", "burn_aligned"]
 
 
+class SetAudioFade(RequestBody):
+    op: Literal["set_audio_fade"]
+    audio_fade_ms: AudioFadeMs
+
+
 class RestoreRevision(RequestBody):
     op: Literal["restore_revision"]
     source_revision_id: ResourceId
@@ -104,7 +111,8 @@ class EditProjectCreate(ProjectCreate, Idempotent):
 
 
 TimelineOperation = Annotated[
-    AppendClip | RemoveClip | ReplaceClip | ReorderClips | SetOutputProfile | SetCaptionPolicy | RestoreRevision,
+    AppendClip | RemoveClip | ReplaceClip | ReorderClips | SetOutputProfile | SetCaptionPolicy | SetAudioFade
+    | RestoreRevision,
     Field(discriminator="op"),
 ]
 

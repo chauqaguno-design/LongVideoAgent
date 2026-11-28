@@ -1,12 +1,20 @@
 """Run one local media tool, cancelling the process and draining its pipes before returning."""
 
 from pathlib import Path
+import re
 import subprocess
 import time
 
 
 class MediaStopped(InterruptedError):
     """A job lost ownership or its worker is shutting down."""
+
+
+def scene_timestamps(log, origin_us, duration_us):
+    for raw_time in re.findall(rb"\bpts_time:([-+\d.eE]+)", log):
+        at = round(float(raw_time) * 1_000_000) - origin_us
+        if 0 < at < duration_us:
+            yield at
 
 
 def check_running(stopped):

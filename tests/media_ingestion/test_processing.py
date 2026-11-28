@@ -92,7 +92,7 @@ def test_real_proxy_subtitle_frames_replay_and_revocation(tmp_path, monkeypatch,
         frames = next(c for c in cov if c["modality"] == "VISUAL" and c["stage"] == "DECODED")[
             "frame_artifact_ids"
         ]
-        assert len(frames) >= 4
+        assert len(frames) == 1  # One midpoint for an uninterrupted three-second shot.
         frame = http.get("/v1/artifacts/" + frames[0]).json()
         assert http.get(frame["url"]).content.startswith(b"\xff\xd8")
         notes_id = http.get(f"/v1/assets/{aid}/notes").json()["artifact_id"]

@@ -13,7 +13,7 @@ const props = defineProps({
   liveSteps: Array,
   image: Object,
 })
-const emit = defineEmits(['seek', 'play', 'timeline'])
+const emit = defineEmits(['seek', 'play', 'timeline', 'inspect-trace'])
 const screenshot = ref('')
 const download = ref(null)
 const savedUsage = ref(null)
@@ -159,6 +159,13 @@ onUnmounted(() => lifecycle.abort())
     <div class="conversation-response">
       <header class="response-header">
         <strong>CutSieve</strong>
+        <button
+          v-if="turn.run_id && turn.run_id !== 'sending'"
+          type="button"
+          class="trace-link"
+          aria-haspopup="dialog"
+          @click="emit('inspect-trace', turn.run_id)"
+        >轨迹</button>
         <span v-if="status" class="status-pill" :data-tone="tone(status)">
           <i class="status-dot" aria-hidden="true"></i>{{ label(status) }}
         </span>

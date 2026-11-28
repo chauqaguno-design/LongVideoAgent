@@ -260,10 +260,12 @@ class EvidenceSearch:
         if text:
             query = query_literal(text) or text
             documents = [r["claim"] if r.get("source") != "sampled-frame" else "" for r in rows]
-            routes["bm25"] = (
-                "zh-en-bm25-v1",
-                BM25Retriever().rank(query, documents, limit=len(rows)),
-            )
+            sparse_rank = getattr(self.catalog, "sparse_rank", None)
+            sparse = sparse_rank(workspace, query, rows) if sparse_rank else []
+            if sparse:
+                routes["fts5"] = ("sqlite-cjk-bigram-v1", sparse)
+            else:
+                routes["bm25"] = ("zh-en-bm25-v1", BM25Retriever().rank(query, documents, limit=len(rows)))
             needle = normalize_text(query)
             if needle:
                 exact = [

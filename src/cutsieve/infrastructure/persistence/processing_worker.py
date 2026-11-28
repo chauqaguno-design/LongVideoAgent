@@ -39,7 +39,7 @@ class ProcessingWorker:
             body,
             pipeline_version=version,
             _local=local_models(),
-            _frame_budget=max(0, min(65536, int(os.getenv("CUTSIEVE_MAX_MEDIA_FRAMES", "4096")))),
+            _frame_budget=max(1, min(65536, int(os.getenv("CUTSIEVE_MAX_MEDIA_FRAMES", "2048")))),
         )
 
     def enqueue(self, scope, asset_id, body):

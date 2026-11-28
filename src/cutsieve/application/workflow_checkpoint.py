@@ -30,6 +30,8 @@ class Usage(BaseModel):
     estimated_cost_cny: float = 0.0
     max_steps: int = 15
     max_images: int = 24
+    images_unloaded: int = 0
+    compactions: int = 0
 
 
 class ToolStep(BaseModel):
@@ -38,6 +40,21 @@ class ToolStep(BaseModel):
     summary: str
     status: Literal["RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"] = "RUNNING"
     ok: bool | None = None
+    args_preview: str = ""
+    duration_ms: int | None = None
+    error_code: str | None = None
+    repaired: bool = False
+    images_added: int = 0
+    step_index: int | None = None
+
+
+class TraceEvent(BaseModel):
+    kind: Literal["MODEL_TURN", "IMAGE_UNLOAD", "COMPACTION", "SELF_REPAIR", "RENDER_WAIT"]
+    step: int = 0
+    summary: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    duration_ms: int | None = None
 
 
 class Citation(BaseModel):
@@ -61,6 +78,7 @@ class PendingRender(BaseModel):
     profile: Literal["PREVIEW", "EXPORT"]
     edit_project_id: str
     revision_id: str
+    started_at_ms: int | None = None
 
 
 class PendingAsk(BaseModel):
@@ -75,6 +93,7 @@ class Checkpoint(BaseModel):
     spec: RunSpec
     messages: list[Document] = Field(default_factory=list)
     tool_steps: list[ToolStep] = Field(default_factory=list)
+    trace_events: list[TraceEvent] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
     clarifications: list[Clarification] = Field(default_factory=list)
     pending_render_tool_call: PendingRender | None = None
@@ -134,11 +153,22 @@ class Checkpoint(BaseModel):
         self.revision_id = revision_id
         self.timeline_heads[edit_id] = revision_no
 
-    def finish_tool(self, call_id, content, summary, ok):
+    def finish_tool(self, call_id, content, summary, ok, *, duration_ms=None, error_code=None, images_added=0):
         step = next(item for item in self.tool_steps if item.tool_call_id == call_id)
+        step.repaired = ok and next(
+            (other.ok is False for other in reversed(self.tool_steps) if other.name == step.name and other.ok is not None),
+            False,
+        )
+        if step.repaired:
+            self.trace_events.append(TraceEvent(
+                kind="SELF_REPAIR", step=step.step_index or 0, summary=f"{step.name} succeeded on retry.",
+            ))
         step.summary = summary
         step.status = "SUCCEEDED" if ok else "FAILED"
         step.ok = ok
+        step.duration_ms = duration_ms
+        step.error_code = error_code
+        step.images_added = images_added
         self.messages.append(dict(role="tool", tool_call_id=call_id, content=content))
         return step.model_dump()
 

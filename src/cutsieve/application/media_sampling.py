@@ -1,9 +1,10 @@
 """Plan sampling over the whole source before spending frame budget."""
 
 from uuid import UUID, uuid5
+from math import ceil
 
 WINDOW_US = 60_000_000
-POLICY = "windows-60s-four-centres-v1"
+POLICY = "shot-midpoints-4500ms-v2"
 PIPELINE = "cutsieve-media-v1"
 SEGMENT_STEP_US = 8_000_000
 SEGMENT_LENGTH_US = 10_000_000
@@ -19,6 +20,29 @@ def windows(duration):
 
 def sample_points(start, end, slot):
     return start + (2 * slot + 1) * (end - start) // 8
+
+
+def adaptive_points(duration, cuts, budget):
+    if duration <= 0:
+        return []
+    boundaries = [0]
+    for cut in sorted(cuts):
+        if cut - boundaries[-1] >= 800_000 and cut < duration:
+            boundaries.append(cut)
+    boundaries.append(duration)
+    points = []
+    for start, end in zip(boundaries, boundaries[1:]):
+        length = end - start
+        count = 1 if length < 5_000_000 else ceil(length / 4_500_000)
+        points.extend(start + (2 * i + 1) * length // (2 * count) for i in range(count))
+    cap = max(1, budget)
+    if len(points) > cap:
+        return [points[(2 * i + 1) * len(points) // (2 * cap)] for i in range(cap)]
+    return points
+
+
+def static_duplicate(previous, current):
+    return previous is not None and sum(abs(a - b) for a, b in zip(previous, current, strict=True)) < len(current) * 1.5
 
 
 def segments(duration):

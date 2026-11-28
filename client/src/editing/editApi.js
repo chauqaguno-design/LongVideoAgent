@@ -35,6 +35,10 @@ export async function listAll(path, signal) {
   return items
 }
 
+export function fetchRunHarness(runId, signal) {
+  return request('/workflow-runs/' + encodeURIComponent(runId) + '/harness', undefined, signal)
+}
+
 export const fileExpired = file => file.url_expires_at && Date.parse(file.url_expires_at) <= Date.now() + 1000
 
 export async function renderArtifact(id, kind, revisionId, signal) {

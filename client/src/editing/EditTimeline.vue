@@ -27,6 +27,7 @@ const revision = computed(() => revisions.value.find(row => row.revision_id === 
 const current = computed(() => !!revision.value && revision.value === head.value)
 const clips = computed(() => revision.value?.clips || [])
 const duration = computed(() => revision.value?.total_duration_us || 0)
+const audioFade = computed(() => revision.value?.audio_fade_ms ?? 0)
 const canChange = computed(() => !loading.value && !busy.value && current.value)
 const submit = makeCommand()
 const lifecycle = new AbortController()
@@ -257,7 +258,10 @@ defineExpose({ saveClip, showRevision, sync })
   >
     <header class="pane-header">
       <h2 id="timeline-heading">时间线</h2>
-      <span class="timeline-total mono">{{ clips.length }} 段 <i></i> {{ timecode(duration) }}</span>
+      <div class="timeline-meta">
+        <span v-if="audioFade > 0" class="status-pill audio-fade mono" data-tone="ready">淡入淡出 {{ audioFade }}ms</span>
+        <span class="timeline-total mono">{{ clips.length }} 段 <i aria-hidden="true"></i> {{ timecode(duration) }}</span>
+      </div>
     </header>
     <div class="timeline-controls">
       <div class="scheme-control">
@@ -316,7 +320,7 @@ defineExpose({ saveClip, showRevision, sync })
         <p v-else class="track-empty">{{ loading ? '正在读取时间线…' : '从原片或对话加入片段' }}</p>
       </div>
 
-      <ol v-if="clips.length" class="edit-clips">
+      <ol v-if="clips.length" class="edit-clips" aria-label="时间线片段" tabindex="0">
         <li v-for="(clip, index) in clips" :key="clip.clip_id" :class="{ 'clip-selected': selectedClip === clip.clip_id }">
           <button class="clip-source bare-button" @click="showClip(clip)">
             <span class="clip-index mono">{{ index + 1 }}</span>

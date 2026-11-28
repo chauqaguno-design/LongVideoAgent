@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
-import { listAll, request, uploadAsset } from './editApi.js'
+import { fetchRunHarness, listAll, request, uploadAsset } from './editApi.js'
 import { assetStatuses, assetTone, usableMedia } from './projectView.js'
 import AgentChat from './AgentChat.vue'
 import EditTimeline from './EditTimeline.vue'
+import HarnessTrace from './HarnessTrace.vue'
 import ProcessingPanel from './ProcessingPanel.vue'
 import StudioMonitor from './StudioMonitor.vue'
 import SystemStatus from './SystemStatus.vue'
@@ -30,6 +31,12 @@ const uploadMessage = ref('')
 const drawer = ref('')
 const dialog = ref(null)
 const latestRun = shallowRef(null)
+const activeRunId = ref('')
+const runs = shallowRef([])
+const traceSelection = ref(null)
+const trace = shallowRef(null)
+const traceLoading = ref(false)
+const traceError = ref(null)
 const timeline = ref(null)
 const editId = ref('')
 const trimDisabled = ref(true)
@@ -42,10 +49,16 @@ let projectSession
 let assetTimer
 let assetLoad = 0
 let upload
+let traceRequest
 
 const source = computed(() => assets.value.find(asset => asset.asset_id === selectedAssetId.value))
 const readyMedia = computed(() => assets.value.filter(usableMedia))
 const statusOf = asset => assetTone(asset, processing.value[asset.asset_id])
+const drawerTitles = { media: '素材与笔记', trace: '运行轨迹', status: '系统状态' }
+const selectedRunId = computed(() => traceSelection.value || activeRunId.value || runs.value[0]?.run_id || null)
+const openTraceId = computed(() => drawer.value === 'trace' ? selectedRunId.value : null)
+const traceRunStatus = computed(() => runs.value.find(row => row.run_id === openTraceId.value)?.status)
+const traceRefreshStatuses = ['SUCCEEDED', 'FAILED', 'CANCELLED', 'WAITING_USER', 'AWAITING_INPUT']
 
 function linkParams() {
   const [route, query] = location.hash.split('?')
@@ -81,6 +94,9 @@ function selectProject(id, edit = '', run = '') {
   monitorIntent.value = null
   availablePreview.value = null
   latestRun.value = null
+  activeRunId.value = run
+  runs.value = []
+  traceSelection.value = null
   editId.value = ''
   trimDisabled.value = true
   drawer.value = ''
@@ -95,6 +111,46 @@ function selectProject(id, edit = '', run = '') {
     refreshAssets()
   }
 }
+
+function selectRun(id) {
+  activeRunId.value = id
+  remember('run', id)
+}
+
+function openTrace(id = null) {
+  traceSelection.value = id
+  drawer.value = 'trace'
+}
+
+async function refreshTrace() {
+  const id = openTraceId.value
+  if (!id) return
+  traceRequest?.abort()
+  const controller = new AbortController()
+  traceRequest = controller
+  traceLoading.value = true
+  traceError.value = null
+  try {
+    const snapshot = await fetchRunHarness(id, controller.signal)
+    if (!controller.signal.aborted) trace.value = snapshot
+  } catch (cause) {
+    if (!controller.signal.aborted) traceError.value = cause.status === 404 ? '此运行暂无轨迹记录' : cause.message
+  } finally {
+    if (!controller.signal.aborted) traceLoading.value = false
+  }
+}
+
+watch([openTraceId, traceRunStatus], ([id, status], [previousId]) => {
+  if (id !== previousId) {
+    traceRequest?.abort()
+    trace.value = null
+    traceLoading.value = false
+    traceError.value = null
+    if (id) refreshTrace()
+  } else if (id && traceRefreshStatuses.includes(status) && trace.value?.status !== status) {
+    refreshTrace()
+  }
+})
 
 async function loadProjects() {
   projectBusy.value = true
@@ -276,6 +332,7 @@ onUnmounted(() => {
   window.removeEventListener('hashchange', followLocation)
   lifecycle.abort()
   projectSession?.abort()
+  traceRequest?.abort()
   upload?.abort()
   clearTimeout(assetTimer)
 })
@@ -324,6 +381,7 @@ onUnmounted(() => {
 
       <div class="drawer-triggers">
         <button aria-haspopup="dialog" :disabled="!projectId" @click="drawer = 'media'">素材与笔记</button>
+        <button aria-haspopup="dialog" @click="openTrace()">运行轨迹</button>
         <button aria-haspopup="dialog" @click="drawer = 'status'">系统状态</button>
       </div>
     </header>
@@ -367,19 +425,21 @@ onUnmounted(() => {
         :initial-run="initialRun"
         :assets="readyMedia"
         :edit-id="editId"
-        @selected="remember('run', $event)"
+        @selected="selectRun"
         @seek="seekSource"
         @play="openPreview"
         @sync="timeline?.sync($event)"
         @timeline="timeline?.showRevision($event)"
         @latest-run="latestRun = $event"
+        @runs="runs = $event"
+        @inspect-trace="openTrace"
       />
     </main>
 
     <dialog ref="dialog" class="studio-drawer" aria-labelledby="studio-drawer-heading" @cancel.prevent="drawer = ''" @click.self="drawer = ''">
       <div v-if="drawer" class="drawer-content">
         <header class="pane-header">
-          <h2 id="studio-drawer-heading">{{ drawer === 'media' ? '素材与笔记' : '系统状态' }}</h2>
+          <h2 id="studio-drawer-heading">{{ drawerTitles[drawer] }}</h2>
           <button @click="drawer = ''">关闭</button>
         </header>
         <ProcessingPanel
@@ -388,6 +448,16 @@ onUnmounted(() => {
           :initial-asset="selectedAssetId"
           @changed="refreshAssets('', true)"
           @seek="seekSource($event, 'notes')"
+        />
+        <HarnessTrace
+          v-else-if="drawer === 'trace'"
+          :runs="runs"
+          :selected-run-id="selectedRunId"
+          :trace="trace"
+          :loading="traceLoading"
+          :error="traceError"
+          @select-run="traceSelection = $event"
+          @refresh="refreshTrace"
         />
         <SystemStatus v-else :latest-run="latestRun" />
       </div>

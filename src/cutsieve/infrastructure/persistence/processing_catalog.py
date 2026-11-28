@@ -5,13 +5,16 @@ import time
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import and_, insert, or_, select, update
+from sqlalchemy import and_, insert, or_, select, text, update
+from sqlalchemy.exc import OperationalError
 
 from cutsieve.application.edit_timeline import timestamp
 from cutsieve.application.media_sampling import identity, PIPELINE
+from cutsieve.application.rank_fusion import RankedCandidate
 from .edit_repository import EditRepository
 from .edit_tables import jobs as render_jobs, revisions
 from .processing_tables import records, runs
+from .search_tables import FTS_TABLE, fts_query, fts_scope, remove_fts, write_fts
 from .source_tables import projects, sources
 from .work_outbox import emit
 
@@ -242,6 +245,13 @@ class MediaCatalog:
                 return
             probe.update(capabilities=capabilities, active_run=run.id, **proxy)
             db.execute(update(sources).where(sources.c.id == source.id).values(probe=probe))
+            if db.get_bind().dialect.name == "sqlite":
+                try:
+                    with db.begin_nested():
+                        self.index_fts(db, run.workspace, run.revision, run.id)
+                except OperationalError:
+                    # SQLite builds without FTS5 still publish searchable evidence.
+                    pass
             _, heads, generation = self.snapshot(db, run.workspace, run.project)
             manifest = record(
                 run, "GENERATION", "manifest", {"project": run.project, "heads": heads}, rid=generation
@@ -362,6 +372,62 @@ class MediaCatalog:
             )
         return result
 
+    @staticmethod
+    def index_fts(db, workspace, revision, run_id):
+        items = db.execute(select(records.c.body).where(
+            records.c.workspace == workspace, records.c.run == run_id, records.c.kind == "EVIDENCE",
+        )).scalars()
+        write_fts(db, workspace, revision, run_id, items)
+
+    def sparse_rank(self, workspace, query, rows):
+        expression = fts_query(query)
+        if not expression:
+            return []
+        generations = {row["source_generation_id"]: row["media_revision_id"]
+                       for row in rows if row.get("source_generation_id")}
+        if not generations:
+            return []
+        scopes = "scope_key:(" + " OR ".join(f'"{fts_scope(run)}"' for run in generations) + ")"
+        params = dict(workspace=workspace, scopes=scopes)
+
+        def indexed(db):
+            if not db.get_bind().dialect.has_table(db.connection(), FTS_TABLE):
+                return set()
+            return set(db.execute(text(f"""
+                SELECT scope_key FROM {FTS_TABLE}
+                WHERE {FTS_TABLE} MATCH :scopes AND workspace=:workspace AND evidence_id=''
+            """), params).scalars())
+
+        try:
+            with self.sessions() as db:
+                if db.get_bind().dialect.name != "sqlite":
+                    return []
+                existing = indexed(db)
+                missing = {run for run in generations if fts_scope(run) not in existing}
+            if missing:
+                # A pinned generation can predate the FTS index. Fill the entire source
+                # generation under the writer lock even when the request has a time range.
+                with self.write() as db:
+                    existing = indexed(db)
+                    current = dict(db.execute(select(sources.c.revision, sources.c.probe).where(
+                        sources.c.workspace == workspace, sources.c.revision.in_(generations.values()),
+                    )).all())
+                    for run in missing:
+                        revision = generations[run]
+                        if fts_scope(run) not in existing and revision in current and not (current[revision] or {}).get("deleted"):
+                            self.index_fts(db, workspace, revision, run)
+            with self.sessions() as db:
+                results = db.execute(text(f"""
+                    SELECT evidence_id, bm25({FTS_TABLE}, 0, 0, 0, 0, 1, 1) AS score
+                    FROM {FTS_TABLE}
+                    WHERE {FTS_TABLE} MATCH :query AND workspace=:workspace
+                    ORDER BY score, evidence_id
+                """), dict(params, query=f"{scopes} AND {{raw_text tokenized_text}}:({expression})"))
+                by_id = {row["evidence_id"]: i for i, row in enumerate(rows)}
+                return [RankedCandidate(by_id[key], -score) for key, score in results if key in by_id]
+        except OperationalError:
+            return []
+
     def pin_generation(self, scope, project):
         """Persist even a head set changed by deleting an unrelated source."""
         with self.write() as db:
@@ -452,6 +518,11 @@ class MediaCatalog:
             probe = dict(source.probe or {}, deleted=True)
             probe.setdefault("deleted_at", int(time.time()))
             db.execute(update(sources).where(sources.c.id == asset).values(probe=probe))
+            try:
+                with db.begin_nested():
+                    remove_fts(db, scope, source.revision)
+            except OperationalError:
+                pass
             pending = db.execute(
                 select(runs)
                 .where(

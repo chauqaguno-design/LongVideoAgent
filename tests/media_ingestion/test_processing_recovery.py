@@ -110,7 +110,7 @@ def test_committed_frame_survives_crash_and_late_output_is_fenced(tmp_path, monk
         cat.commit(old, stage="LATE")
     worker.perform(retry)
     first_id, first_rows = cat.search_scope(scope, project)
-    assert len([r for r in first_rows if r["source"] == "sampled-frame"]) == 4
+    assert len([r for r in first_rows if r["source"] == "sampled-frame"]) == 1
     assert cat.get(scope, retry.id)["index_generation_id"] == first_id
     enqueue("run-two")
     enqueue("run-three")

@@ -130,9 +130,12 @@ def install_workflow_routes(app, workspace_user, *, transport=None):
     @router.get("/workflow-runs/{run_id}/harness")
     def harness_view(run_id: str, offset: int = Query(0, ge=0), scope=Depends(workspace)):
         with repo.sessions() as db:
-            cp = repo.readable(db, scope, run_id).checkpoint
+            row = repo.readable(db, scope, run_id)
+            cp = row.checkpoint
             return dict(run_id=run_id, harness_version=2, revision_id=cp.revision_id,
-                        tool_steps=[step.model_dump() for step in cp.tool_steps[offset:offset + 32]])
+                        status=row.state["status"], usage=cp.usage.model_dump(), warnings=list(cp.warnings),
+                        tool_steps=[step.model_dump() for step in cp.tool_steps[offset:offset + 64]],
+                        trace_events=[event.model_dump() for event in cp.trace_events[-128:]])
 
     @router.post("/workflow-runs/{run_id}/resume", status_code=202)
     def resume(run_id: str, body: WorkflowResume, scope=Depends(workspace)):

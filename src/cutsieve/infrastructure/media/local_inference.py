@@ -9,7 +9,16 @@ from importlib.metadata import version
 import json
 import os
 from pathlib import Path
+import sys
 import unicodedata
+import wave
+
+
+def asr_model_config(env):
+    candidates = (env.get("CUTSIEVE_WHISPER_DIR"), env.get("CUTSIEVE_WHISPER_MODEL_ROOT"))
+    root = next((str(Path(path).resolve()) for path in candidates if path and Path(path).is_dir()), "")
+    interpreter = env.get("CUTSIEVE_ASR_PYTHON") or env.get("CUTSIEVE_MEDIA_PYTHON") or sys.executable
+    return root, interpreter
 
 
 def aligned_words(model, audio, text, language, offset):
@@ -49,9 +58,19 @@ def aligned_words(model, audio, text, language, offset):
     return words
 
 
+def read_pcm16(path, rate):
+    # The worker has already decoded the source to mono PCM. Reading that WAV
+    # directly also avoids relying on the optional PyAV input API.
+    with wave.open(str(path), "rb") as audio:
+        if (audio.getnchannels(), audio.getsampwidth(), audio.getframerate()) != (1, 2, rate):
+            raise ValueError(f"Whisper input must be mono PCM16 at {rate} Hz")
+        return audio.readframes(audio.getnframes())
+
+
 def build_asr(root):
+    import numpy as np
+
     from faster_whisper import WhisperModel
-    from faster_whisper.audio import decode_audio
     from faster_whisper.vad import VadOptions, get_speech_timestamps
 
     model = WhisperModel(
@@ -64,7 +83,7 @@ def build_asr(root):
 
     def infer(path):
         rate = 16_000
-        audio = decode_audio(str(path), sampling_rate=rate)
+        audio = np.frombuffer(read_pcm16(path, rate), dtype="<i2").astype(np.float32) / 32768
         vad = VadOptions(min_silence_duration_ms=800, max_speech_duration_s=28)
         regions = get_speech_timestamps(audio, vad, sampling_rate=rate)
         result = {

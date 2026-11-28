@@ -8,6 +8,8 @@ from fastapi import Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
+from cutsieve.infrastructure.media.local_inference import asr_model_config
+from cutsieve.infrastructure.media.processing_units import asr_version
 
 from cutsieve.infrastructure.persistence.edit_tables import jobs
 from cutsieve.infrastructure.persistence.outbox_tables import outbox
@@ -19,8 +21,10 @@ from cutsieve.infrastructure.providers.config import configured_model, model_sup
 def capabilities(env):
     config = configured_model(env)
     configured = config is not None
+    asr_root, interpreter = asr_model_config(env)
+    local_asr = asr_version(interpreter) if asr_root else None
+    remote_asr = bool(env.get("CUTSIEVE_ASR_API_KEY"))
     services = {
-        "ASR": env.get("CUTSIEVE_WHISPER_DIR") or env.get("CUTSIEVE_WHISPER_MODEL_ROOT") or env.get("CUTSIEVE_ASR_API_KEY"),
         "OCR": env.get("CUTSIEVE_PADDLE_OCR_DIR") or env.get("CUTSIEVE_OCR_COMMAND") or shutil.which("tesseract"),
         "embedding": env.get("CUTSIEVE_SEARCH_ENCODER_URL") or env.get("CUTSIEVE_EMBEDDING_BASE_URL"),
         "reranker": env.get("CUTSIEVE_RERANKER_ENABLED", "").lower() == "true",
@@ -35,8 +39,10 @@ def capabilities(env):
         native_tools=configured and env.get("CUTSIEVE_WORKFLOW_LIVE_MODEL", "1") != "0",
         structured_json=configured,
         dedicated_services=[
-            dict(name=name, configured=bool(value), verified=False, version=None)
-            for name, value in services.items()
+            dict(name="ASR", configured=bool(local_asr or remote_asr), ready=bool(local_asr or remote_asr),
+                 verified=bool(local_asr), version=local_asr),
+            *(dict(name=name, configured=bool(value), verified=False, version=None)
+              for name, value in services.items()),
         ],
     )
 

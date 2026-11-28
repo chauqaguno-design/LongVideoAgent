@@ -7,7 +7,7 @@ import { label, pending } from './projectView.js'
 import AgentTurn from './AgentTurn.vue'
 
 const props = defineProps({ projectId: String, editId: String, initialRun: String, assets: { type: Array, default: () => [] } })
-const emit = defineEmits(['selected', 'latest-run', 'seek', 'play', 'timeline', 'sync'])
+const emit = defineEmits(['selected', 'latest-run', 'seek', 'play', 'timeline', 'sync', 'runs', 'inspect-trace'])
 const history = ref([])
 const selected = ref('')
 const turns = ref([])
@@ -40,6 +40,19 @@ const waiting = computed(() => run.value?.status === 'AWAITING_INPUT')
 const running = computed(() => pending(run.value))
 const shownTurns = computed(() => optimistic.value ? [...turns.value, optimistic.value] : turns.value)
 const latestId = computed(() => latestCreated.value || history.value[0]?.run_id)
+const traceRuns = computed(() => {
+  const rows = new Map(history.value.map(row => [row.run_id, row]))
+  for (const turn of [...turns.value].reverse()) {
+    rows.set(turn.run_id, { ...rows.get(turn.run_id), ...turn })
+  }
+  if (selected.value && !rows.has(selected.value)) {
+    rows.set(selected.value, { run_id: selected.value })
+  }
+  return [...rows.values()].map(row => ({
+    ...row,
+    status: states.value[row.run_id]?.status || row.status,
+  }))
+})
 const canCompose = computed(() => !!props.projectId && !busy.value && !running.value && (!selected.value || !!run.value))
 const canSend = computed(() => canCompose.value && !uploading.value && message.value.trim() &&
   (!waiting.value || run.value.state_version != null))
@@ -353,6 +366,7 @@ const historyTitle = row => (turns.value.find(turn => turn.run_id === row.run_id
 watch(() => props.assets, rows => {
   if (scope.value && !rows.some(row => row.media_revision_id === scope.value)) scope.value = ''
 })
+watch(traceRuns, rows => emit('runs', rows))
 
 onMounted(() => {
   if (!props.projectId) return
@@ -405,6 +419,7 @@ onUnmounted(() => {
         @seek="emit('seek', $event)"
         @play="emit('play', $event)"
         @timeline="emit('timeline', $event)"
+        @inspect-trace="emit('inspect-trace', $event)"
       />
 
       <section v-if="waiting && run.awaiting_input" class="conversation-clarification" aria-label="需要确认">

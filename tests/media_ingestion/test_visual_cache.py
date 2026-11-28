@@ -62,7 +62,7 @@ def test_visual_cache_rebinds_frames_and_invalidates_only_affected_stage(tmp_pat
                     text="公开测试观察",
                     frames=ids,
                     claim_type="OBSERVED",
-                    temporal=True,
+                    temporal=len(ids) > 1,
                 )
             ]
         }

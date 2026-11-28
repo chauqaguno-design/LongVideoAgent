@@ -126,12 +126,7 @@ def test_frame_uses_the_original_display_rotation(tmp_path):
             tools["ffmpeg"],
             "-v",
             "error",
-            "-i",
-            str(original),
-            "-c",
-            "copy",
-            "-metadata:s:v:0",
-            "rotate=90",
+            *rotation_fixture_args(tools["ffmpeg"], original),
             str(rotated),
         ],
         check=True,
@@ -144,3 +139,10 @@ def test_frame_uses_the_original_display_rotation(tmp_path):
     with Image.open(path) as image:
         assert image.size == (64, 96)
         assert image.getpixel((32, 16))[2] > 230 and image.getpixel((32, 80))[0] > 230
+
+
+def rotation_fixture_args(ffmpeg, original):
+    options = subprocess.check_output([ffmpeg, "-hide_banner", "-h", "full"])
+    if b"-display_rotation" in options:
+        return ["-display_rotation:v:0", "90", "-i", str(original), "-c", "copy"]
+    return ["-i", str(original), "-c", "copy", "-metadata:s:v:0", "rotate=90"]

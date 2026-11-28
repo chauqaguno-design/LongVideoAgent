@@ -28,6 +28,19 @@ def create_sqlalchemy_engine(database_url: str | URL) -> Engine:
         raise ValueError("A SQLite database URL is required")
     engine = create_engine(url)
 
+    def application_tables(connection, schema=None, **kwargs):
+        from .search_tables import FTS_TABLE
+
+        names = sqlite_table_names(connection, schema=schema, **kwargs)
+        auxiliary = {FTS_TABLE, *(f"{FTS_TABLE}_{suffix}" for suffix in
+                                ("config", "content", "data", "docsize", "idx"))}
+        return [name for name in names if name not in auxiliary]
+
+    # Alembic uses the engine's table reflection. The virtual table and its
+    # shadow tables are disposable search data, outside the managed schema.
+    sqlite_table_names = engine.dialect.get_table_names
+    engine.dialect.get_table_names = application_tables
+
     @event.listens_for(engine, "connect")
     def configure_sqlite(connection, _record):
         cursor = connection.cursor()

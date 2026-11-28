@@ -121,6 +121,7 @@ def probe_media(source: Path, *, ffprobe="ffprobe", stopped=None) -> dict:
                 average_frame_rate=video.get("avg_frame_rate"),
                 video_time_base=video["time_base"], video_index=video["index"],
                 audio_index=audio["index"] if audio else None,
+                audio_duration_ts=int(audio["duration_ts"]) if audio and "duration_ts" in audio else None,
                 has_subtitles=any(s["codec_type"] == "subtitle" for s in raw["streams"]),
                 browser_playable=("mp4" in fmt["format_name"] and video["codec_name"] == "h264"
                                   and video.get("pix_fmt") in ("yuv420p", "yuvj420p")
@@ -233,7 +234,7 @@ def _video_filters(cut, output, fps):
     clip = cut.clip
     absolute = _origin(cut.meta) + Fraction(clip["source_start_us"], US)
     filters = [f"trim=start_pts={cut.first_pts}:end_pts={cut.end_pts}",
-               f"setpts=PTS-({_seconds(absolute)})/TB"]
+               f"setpts='max(PTS-({_seconds(absolute)})/TB,0)'"]
     if crop := clip.get("crop"):
         filters.append("crop={width}:{height}:{x}:{y}:exact=1".format(**crop))
     # Normalise non-square pixels *before* fitting the result to the output canvas.
@@ -241,23 +242,40 @@ def _video_filters(cut, output, fps):
     filters.extend(["scale=w='max(2,trunc(iw*sar/2)*2)':h=ih", "setsar=1",
                     f"scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2",
                     f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2", "setsar=1", "format=yuv420p",
+                    # A sparse VFR cut can contain one frame. Give FPS a later
+                    # timestamp even if the pre-padding filter has no input rate.
+                    "tpad=stop=1:stop_mode=clone",
+                    f"setpts='if(eq(PTS,PREV_INPTS),PREV_OUTPTS+ceil(1/(({fps})*TB)),PTS)'",
                     f"fps={fps}:start_time=0:round=up", "tpad=stop=-1:stop_mode=clone",
                     f"trim=end_frame={cut.output_end-cut.output_start}", "setpts=PTS-STARTPTS"])
     return ",".join(filters)
 
 
-def _audio_filters(cut, index, fps):
+def _audio_filters(cut, index, fps, audio_fade_ms=0):
     """Both streams use the same clip origin; preserve leading silence after a delayed audio start."""
     clip = cut.clip
     samples = round(cut.output_end * 48000 / fps) - round(cut.output_start * 48000 / fps)
     if clip["audio_policy"] == "mute" or cut.meta["audio_index"] is None:
         return f"anullsrc=r=48000:cl=stereo,atrim=end_sample={samples}"
     origin = _origin(cut.meta)
-    start = _seconds(origin + Fraction(clip["source_start_us"], US))
-    end = _seconds(origin + Fraction(clip["source_end_us"], US))
+    source_start = origin + Fraction(clip["source_start_us"], US)
+    source_end = origin + Fraction(clip["source_end_us"], US)
+    audio = next(stream for stream in cut.meta["streams"] if stream["kind"] == "audio")
+    time_base = Fraction(audio["time_base_num"], audio["time_base_den"])
+    audio_start = audio["start_pts"] * time_base
+    audio_duration = cut.meta.get("audio_duration_ts")
+    if source_end <= audio_start or (audio_duration is not None and source_start >= audio_start + audio_duration * time_base):
+        return f"anullsrc=r=48000:cl=stereo,atrim=end_sample={samples}"
+    start, end = _seconds(source_start), _seconds(source_end)
+    duration_s = (clip["source_end_us"] - clip["source_start_us"]) / US
+    fade_s = min(audio_fade_ms / 1000, duration_s / 3)
+    fades = (
+        f",afade=t=in:st=0:d={fade_s:.3f},afade=t=out:st={max(0.0, duration_s - fade_s):.3f}:d={fade_s:.3f}"
+        if fade_s >= 0.02 else ""
+    )
     return (f"[{index}:{cut.meta['audio_index']}]atrim=start={start}:end={end},"
             f"asetpts=PTS-({start})/TB,aresample=48000:async=1:first_pts=0,"
-            f"aformat=channel_layouts=stereo,apad,atrim=end_sample={samples}")
+            f"aformat=channel_layouts=stereo,apad,atrim=end_sample={samples}{fades}")
 
 
 def _subtitles(cuts, manifest, revision, tracks, ffmpeg, stopped):
@@ -292,8 +310,10 @@ def _validate_output(target, manifest, ffmpeg, ffprobe, stopped, soft_cues):
                            "-of", "json", str(target)], stopped=stopped))
     video = next((s for s in raw["streams"] if s["codec_type"] == "video"), None)
     audio = next((s for s in raw["streams"] if s["codec_type"] == "audio"), None)
-    if not video or bool(audio) != manifest.get("has_audio", True):
-        raise ValueError("Output streams differ from the compiled video and audio layout")
+    if not video:
+        raise ValueError("Output is missing its compiled video stream")
+    if bool(audio) != manifest.get("has_audio", True):
+        raise ValueError("Output audio stream differs from the compiled timeline")
     _, _, video_codec, audio_codec, _ = CODECS[container]
     video_codecs = {video_codec, "av1"} if container == "webm" else {video_codec}
     muxer = "mp4" if container == "mp4" else "matroska"
@@ -389,7 +409,7 @@ def render_timeline(revision, sources, output, *, job_id, profile="PREVIEW",
             args.extend([*SOURCE_FLAGS, "-threads", "2", "-i", str(cut.source)])
             graph.append(f"[{i}:{cut.meta['video_index']}]" + _video_filters(cut, p, fps) + f"[v{i}]")
             if has_audio:
-                graph.append(_audio_filters(cut, i, fps) + f"[a{i}]")
+                graph.append(_audio_filters(cut, i, fps, revision.get("audio_fade_ms", 0)) + f"[a{i}]")
         n = len(cuts)
         videos = "".join(f"[v{i}]" for i in range(n))
         video = f"{videos}concat=n={n}:v=1:a=0,settb={fps.denominator}/{fps.numerator},setpts=N"

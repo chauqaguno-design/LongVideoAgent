@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import inspect
 
 from cutsieve.infrastructure.persistence.migrations import require_schema_head, upgrade_schema
+from cutsieve.infrastructure.persistence.search_tables import FTS_CREATE
 from cutsieve.infrastructure.persistence.sqlalchemy import Base, create_sqlalchemy_engine
 
 
@@ -35,3 +36,12 @@ def test_head_check_never_performs_ddl(engine):
     before = inspect(engine).get_table_names()
     require_schema_head(engine)
     assert inspect(engine).get_table_names() == before
+
+
+def test_runtime_fts_and_shadow_tables_do_not_create_migration_drift(engine):
+    upgrade_schema(engine)
+    with engine.begin() as db:
+        db.exec_driver_sql(FTS_CREATE)
+        tables = set(db.exec_driver_sql("SELECT name FROM sqlite_master WHERE type = 'table'").scalars())
+        assert {"media_evidence_fts", "media_evidence_fts_data", "media_evidence_fts_idx"} <= tables
+    assert_no_drift(engine)

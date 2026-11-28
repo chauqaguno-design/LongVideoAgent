@@ -2,8 +2,10 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import App from '../src/App.vue'
 import AgentTurn from '../src/editing/AgentTurn.vue'
+import EditTimeline from '../src/editing/EditTimeline.vue'
+import HarnessTrace from '../src/editing/HarnessTrace.vue'
 import RenderJobs from '../src/editing/RenderJobs.vue'
-import { clipDraft, makeCommand, uploadAsset } from '../src/editing/editApi.js'
+import { clipDraft, fetchRunHarness, makeCommand, uploadAsset } from '../src/editing/editApi.js'
 
 const json = (body, status = 200) => Response.json(body, { status })
 const page = (items = []) => ({ items, next_cursor: null })
@@ -89,6 +91,154 @@ afterEach(() => {
   vi.useRealTimers()
   history.replaceState(null, '', '/')
   localStorage.clear()
+})
+
+test('loads the harness endpoint with an encoded run ID and the supplied abort signal', async () => {
+  const body = { run_id: 'run/a?x#中', harness_version: 2, tool_steps: [] }
+  const fetch = server(path => {
+    if (path.endsWith('/harness')) return json({ code: 0, message: '', data: body })
+  })
+  const { signal } = new AbortController()
+  await expect(fetchRunHarness(body.run_id, signal)).resolves.toEqual(body)
+  expect(fetch).toHaveBeenCalledExactlyOnceWith(
+    '/v1/workflow-runs/run%2Fa%3Fx%23%E4%B8%AD/harness', { method: 'GET', signal },
+  )
+})
+
+test('renders harness metrics, repaired tools and lifecycle events with step metadata', () => {
+  const wrapper = render(HarnessTrace, {
+    runs: [{ run_id: 'run', message: '保存时间线' }],
+    selectedRunId: 'run',
+    trace: {
+      status: 'SUCCEEDED',
+      usage: { ...usage, images_unloaded: 5, compactions: 1 },
+      warnings: [{ message: '已接近用量上限' }],
+      tool_steps: [
+        { tool_call_id: 'call_1', name: 'edit_timeline', status: 'SUCCEEDED', summary: '已保存 V1',
+          step_index: 3, repaired: true, args_preview: 'clips=2, audio_fade_ms=300',
+          duration_ms: 142, images_added: 2 },
+        { tool_call_id: 'call_2', name: 'render_video', status: 'FAILED', duration_ms: 1800, error_code: 'RENDER_ERROR' },
+      ],
+      trace_events: [
+        { kind: 'MODEL_TURN', step: 0, summary: '完成推理', input_tokens: 4100, output_tokens: 220, duration_ms: 1800 },
+        { kind: 'IMAGE_UNLOAD', step: 1, summary: '已卸载历史帧' },
+        { kind: 'COMPACTION', step: 2, summary: '已压缩上下文' },
+        { kind: 'SELF_REPAIR', step: 3, summary: '已修复参数' },
+        { kind: 'RENDER_WAIT', step: 4, summary: '等待作业结果' },
+      ],
+    },
+  })
+  expect(wrapper.get('.trace-run-status').text()).toContain('已完成')
+  expect(wrapper.findAll('.trace-kpis dt').map(node => node.text())).toEqual([
+    '模型轮次', '工具调用', '自修复', '帧卸载', '上下文压缩', 'Token（入 / 出）与费用',
+  ])
+  expect(wrapper.findAll('.trace-kpis dd').slice(0, 5).map(node => node.text())).toEqual(['2', '3', '1', '5', '1'])
+  expect(wrapper.get('.trace-token-kpi').text()).toContain('1,024 / 128')
+  expect(wrapper.get('.trace-token-kpi').text()).toContain('¥0.048')
+  const [saved, failed] = wrapper.findAll('.trace-step')
+  for (const detail of ['#3', 'edit_timeline', '成功', '已自修复', '142 ms', '+2 帧', '已保存 V1']) {
+    expect(saved.text()).toContain(detail)
+  }
+  expect(saved.get('.trace-args').text()).toBe('clips=2, audio_fade_ms=300')
+  for (const detail of ['失败', '1.8 s', 'RENDER_ERROR']) expect(failed.text()).toContain(detail)
+  expect(wrapper.findAll('.trace-event').map(node => node.attributes('data-kind'))).toEqual([
+    'MODEL_TURN', 'IMAGE_UNLOAD', 'COMPACTION', 'SELF_REPAIR', 'RENDER_WAIT',
+  ])
+  expect(wrapper.get('[data-kind="MODEL_TURN"]').text()).toContain('Token 4,100 / 220')
+  expect(wrapper.get('[data-kind="COMPACTION"]').text()).toContain('已压缩上下文')
+  expect(wrapper.get('.trace-warnings').text()).toContain('已接近用量上限')
+})
+
+test('selects a run and refreshes while handling empty, legacy and nullable harness data', async () => {
+  const warn = vi.spyOn(console, 'warn')
+  const error = vi.spyOn(console, 'error')
+  const wrapper = render(HarnessTrace)
+  expect(wrapper.text()).toContain('暂无运行记录')
+  expect(button(wrapper, '刷新轨迹').attributes()).toHaveProperty('disabled')
+  await wrapper.setProps({
+    runs: [{ run_id: 'old', prompt: '旧剪辑', status: 'SUCCEEDED' }, { run_id: 'new', message: '新剪辑' }],
+    selectedRunId: 'old',
+    trace: {
+      run_id: 'old', harness_version: 1, usage: null, warnings: null, trace_events: null,
+      tool_steps: [{ name: 'search_evidence', summary: '已找到证据', ok: true, args_preview: null, duration_ms: null }],
+    },
+  })
+  const switcher = wrapper.get('[aria-label="选择运行"]')
+  expect(switcher.element.selectedOptions[0].text).toBe('旧剪辑')
+  await switcher.setValue('new')
+  expect(wrapper.emitted('select-run')).toEqual([['new']])
+  await click(wrapper, '刷新轨迹')
+  expect(wrapper.emitted('refresh')).toEqual([[]])
+  expect(wrapper.get('.trace-step').text()).toContain('成功')
+  expect(wrapper.text()).toContain('暂无生命周期事件记录')
+  expect(wrapper.text()).not.toMatch(/undefined|NaN|null/)
+  await wrapper.setProps({ trace: { tool_steps: null } })
+  expect(wrapper.text()).toContain('暂无工具调用记录')
+  expect(warn).not.toHaveBeenCalled()
+  expect(error).not.toHaveBeenCalled()
+})
+
+test('shows the active run, refreshes on completion and opens a specific historical turn', async () => {
+  history.replaceState(null, '', '#edit?project=p&run=active')
+  const events = channel('active')
+  const old = { run_id: 'old', message: '旧剪辑', status: 'SUCCEEDED', created_at: '2026-11-27T20:00Z', usage }
+  let active = { run_id: 'active', message: '当前剪辑', status: 'RUNNING', created_at: '2026-11-27T19:00Z' }
+  let pendingRefresh
+  let resolveRefresh
+  const fetch = server(path => {
+    if (path.endsWith('/p/workflow-runs')) return json(page([old, active]))
+    if (path.endsWith('/active')) return json(active)
+    if (path.endsWith('/active/conversation')) return json({ turns: [old, active] })
+    if (path.endsWith('/active/events')) return events.response()
+    if (path.endsWith('/active/result')) return json({ answer: '已完成剪辑' })
+    if (path.endsWith('/active/harness')) return json({ status: active.status, tool_steps: [] })
+    if (path.endsWith('/old/harness')) {
+      return pendingRefresh || json({ tool_steps: [{ name: 'get_timeline', summary: '旧轨迹' }] })
+    }
+  })
+  const wrapper = render()
+  await flushPromises()
+  await click(wrapper, '运行轨迹')
+  await flushPromises()
+  expect(wrapper.get('[aria-label="选择运行"]').element.value).toBe('active')
+  expect(wrapper.get('.trace-run-status').text()).toContain('处理中')
+  active = { ...active, status: 'SUCCEEDED' }
+  events.push('RUN_COMPLETED', {})
+  await flushPromises()
+  expect(wrapper.get('.trace-run-status').text()).toContain('已完成')
+  expect(fetch.mock.calls.filter(([url]) => url.endsWith('/active/harness'))).toHaveLength(2)
+
+  await click(wrapper, '关闭')
+  await click(wrapper.get('[data-run-id="old"]'), '轨迹')
+  await flushPromises()
+  expect(wrapper.get('[aria-label="选择运行"]').element.value).toBe('old')
+  expect(wrapper.get('.trace-step').text()).toContain('旧轨迹')
+  pendingRefresh = new Promise(resolve => { resolveRefresh = resolve })
+  await click(wrapper, '刷新轨迹')
+  const [, options] = fetch.mock.calls.at(-1)
+  expect(options.signal.aborted).toBe(false)
+  await wrapper.get('[aria-label="选择运行"]').setValue('active')
+  expect(options.signal.aborted).toBe(true)
+  resolveRefresh(json({ tool_steps: [{ summary: '迟到的旧轨迹' }] }))
+  await flushPromises()
+  expect(wrapper.find('.trace-step').exists()).toBe(false)
+  expect(fetch.mock.calls.filter(([url]) => url.endsWith('/active/harness'))).toHaveLength(3)
+})
+
+test('shows audio fade in the timeline header only for the selected revision with positive fade', async () => {
+  const older = { ...zero, revision_id: 'r-with-zero', revision_no: 1, audio_fade_ms: 0 }
+  const withFade = { ...first, revision_no: 2, audio_fade_ms: 300 }
+  server(path => {
+    if (path.endsWith('/e/revisions')) return json(page([withFade, older, zero]))
+  })
+  const wrapper = render(EditTimeline, { projectId: 'p', assets: [asset] })
+  await flushPromises()
+  expect(wrapper.get('.pane-header .audio-fade').text()).toBe('淡入淡出 300ms')
+  const selector = wrapper.get('[aria-label="时间线版本"]')
+  for (const revision of [older, zero]) {
+    await selector.setValue(revision.revision_id)
+    expect(wrapper.find('.audio-fade').exists()).toBe(false)
+  }
 })
 
 test('renders assistant Markdown and displays raw HTML as inert text', () => {

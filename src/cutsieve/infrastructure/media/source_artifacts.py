@@ -3,13 +3,12 @@
 from fractions import Fraction
 import hashlib
 from pathlib import Path
-import re
 
 from PIL import Image
 
 from cutsieve.infrastructure.edit_captions import Cue, parse_srt
 from cutsieve.infrastructure.edit_media import SOURCE_FLAGS, US, _boundary, _origin, probe_media
-from .process import command
+from .process import command, scene_timestamps
 
 
 def digest_file(path):
@@ -79,30 +78,25 @@ class SourceReader:
             image.verify()
         return actual
 
-    def scene_points(self, start, end):
+    def scene_points(self):
         _, err = self.ff(
-            ["-ss", str(start / US), "-t", str((end - start) / US)],
+            ["-copyts", "-filter_threads", "1"],
             [
                 "-map",
                 f"0:{self.probe['video_index']}",
                 "-an",
                 "-vf",
-                "scale=160:-2,select='gt(scene,0.32)',showinfo",
+                "scale=160:-2,select='gt(scene,0.30)',showinfo",
                 "-vsync",
                 "0",
-                "-frames:v",
-                "4",
                 "-f",
                 "null",
                 "-",
             ],
             log="info",
+            timeout=3600,
         )
-        return [
-            start + round(float(t) * US)
-            for t in re.findall(rb"\bpts_time:([-+\d.eE]+)", err)
-            if 0 <= float(t) < (end - start) / US
-        ][:4]
+        return list(scene_timestamps(err, round(self.origin * US), self.probe["duration_us"]))
 
     def subtitle_text(self):
         if not self.probe["has_subtitles"]:
@@ -153,9 +147,20 @@ class SourceReader:
             )
         self.ff(["-copyts"], [*post, "-movflags", "+faststart", output], timeout=3600)
         checked = probe_media(output, ffprobe=self.ffprobe, stopped=self.stopped)
+        duration = self.probe["duration_us"]
+        raw_rate = self.probe.get("average_frame_rate")
+        rate = Fraction(raw_rate) if raw_rate and raw_rate != "0/0" else 0
+        if duration - checked["duration_us"] > 100_000 and rate > 0:
+            # Some FFmpeg versions drop the last packet duration on passthrough
+            # encodes. Without B-frame reorder, the muxer keeps the fallback duration.
+            self.ff(["-copyts"], [
+                *post, "-bf", "0", "-bsf:v", f"setts=duration='if(gt(DURATION,0),DURATION,1/(({rate})*TB))'",
+                "-movflags", "+faststart", output,
+            ], timeout=3600)
+            checked = probe_media(output, ffprobe=self.ffprobe, stopped=self.stopped)
         if (
             not checked["browser_playable"]
-            or abs(checked["duration_us"] - self.probe["duration_us"]) > 100_000
+            or abs(checked["duration_us"] - duration) > 100_000
         ):
             raise ValueError("代理视频时长与原片不符")
         return {

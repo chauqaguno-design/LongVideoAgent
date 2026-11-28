@@ -6,6 +6,7 @@ import os
 from functools import cache
 from importlib.resources import files
 from math import isfinite
+from time import perf_counter, time
 
 import aiohttp
 from fastapi import HTTPException
@@ -20,7 +21,7 @@ from .agent_tools import (
 )
 from .conversation_runs import turn_history
 from .edit_timeline import EditError
-from .workflow_checkpoint import PendingAsk, PendingRender, ToolStep
+from .workflow_checkpoint import PendingAsk, PendingRender, ToolStep, TraceEvent
 
 
 SYSTEM_PROMPT = """You are CutSieve's video editing and evidence assistant.
@@ -37,7 +38,7 @@ Answer in the user's language."""
 TOOL_HINTS = {
     "ASSET_NOT_FOUND": "Use an asset_id or media_revision_id from get_media_overview.",
     "ASSET_REQUIRED": "Choose an asset from get_media_overview.",
-    "REVISION_CONFLICT": "Call get_timeline for the latest head_revision_no and adjust the edit against that revision.",
+    "REVISION_CONFLICT": "Retry with details.head_revision_no as expected_revision, or call get_timeline.",
     "INVALID_RANGE": "Check the available source or timeline duration and use a valid interval in seconds.",
     "EMPTY_TIMELINE": "Use edit_timeline to add at least one clip before rendering.",
     "EMPTY_QUERY": "Pass a non-empty query or a project query image.",
@@ -105,6 +106,95 @@ def next_tool_call(messages):
     return None
 
 
+def elapsed_ms(start):
+    return round((perf_counter() - start) * 1000)
+
+
+def args_preview(raw):
+    def clean(value):
+        if isinstance(value, dict):
+            return {
+                key[:48]: ("[redacted]" if any(word in key.lower() for word in
+                           ("password", "secret", "token", "api_key", "authorization")) else clean(item))
+                for key, item in list(value.items())[:12]
+            }
+        if isinstance(value, list):
+            return [clean(item) for item in value[:4]]
+        if isinstance(value, str):
+            return "[inline data]" if "data:" in value.lower() else value[:100]
+        return value
+
+    try:
+        args = json.loads(raw)
+        preview = json.dumps(clean(args), ensure_ascii=False, separators=(",", ":"))
+    except (ValueError, RecursionError):
+        return "[invalid JSON]"
+    if len(preview) <= 160:
+        return preview
+    return json.dumps({"preview": preview[:64] + "…"}, ensure_ascii=False, separators=(",", ":"))
+
+
+def history_chars(messages):
+    return len(json.dumps(messages, ensure_ascii=False, separators=(",", ":")))
+
+
+def prepare_history(cp, env):
+    messages = cp.messages
+    step = cp.usage.model_calls
+    last_assistant = max((i for i, msg in enumerate(messages) if msg["role"] == "assistant"), default=-1)
+    unloaded = 0
+    for message in messages[:last_assistant] if last_assistant >= 0 else ():
+        content = message.get("content")
+        if message["role"] != "tool" or not isinstance(content, list):
+            continue
+        saved = [part for part in content if part.get("type") != "image_url"]
+        count = len(content) - len(saved)
+        if count:
+            saved.append(dict(type="text", text=f"[已卸载历史视觉帧: {count}张，内容已由前序分析吸收]"))
+            message["content"] = saved
+            unloaded += count
+    if unloaded:
+        cp.usage.images_unloaded += unloaded
+        cp.trace_events.append(TraceEvent(kind="IMAGE_UNLOAD", step=step, summary=f"Unloaded {unloaded} historical images."))
+
+    max_msgs = int(env.get("CUTSIEVE_COMPACT_MAX_MESSAGES", "18"))
+    max_chars = int(env.get("CUTSIEVE_COMPACT_CHAR_LIMIT", "48000"))
+    before = history_chars(messages)
+    if len(messages) <= max_msgs and before <= max_chars:
+        return
+
+    # Parent turns precede the current request and may also need compaction.
+    users = [i for i, msg in enumerate(messages) if msg["role"] == "user"]
+    initial = next((i for i in users if isinstance(messages[i]["content"], list)
+                    or messages[i]["content"] == cp.spec.message), users[0] if users else -1)
+    tail = max(initial + 1, len(messages) - 6)
+    while tail > initial + 1 and tail < len(messages) and messages[tail]["role"] == "tool":
+        tail -= 1
+    prefix = [msg for i, msg in enumerate(messages[:initial + 1]) if i == initial or msg["role"] == "system"]
+    omitted = len(messages) - len(prefix) - len(messages[tail:])
+    if omitted < 2:
+        return
+    retained_ids = {msg["tool_call_id"] for msg in messages[tail:] if msg["role"] == "tool"}
+    previous_tools = [item for item in cp.tool_steps if item.tool_call_id not in retained_ids]
+    tools = "; ".join(f"{item.name} ({item.status}): {item.summary[:100]}" for item in previous_tools[-16:])
+    citations = "; ".join(f"{c.label[:120]}: {c.text[:110]}" for c in cp.citations[-10:])
+    summary = (
+        f"Earlier conversation summary. Completed tools: {tools or 'none'}. "
+        f"Timestamped evidence: {citations or 'none'}. "
+        f"Current timeline revision: {cp.revision_id or 'none'} "
+        f"(head {cp.timeline_heads.get(cp.edit_project_id, 'unknown')})."
+    )
+    compacted = [*prefix, dict(role="user", content=summary), *messages[tail:]]
+    after = history_chars(compacted)
+    if after >= before and len(messages) <= max_msgs:
+        return
+    cp.messages = compacted
+    cp.usage.compactions += 1
+    cp.trace_events.append(TraceEvent(
+        kind="COMPACTION", step=step, summary=f"Summarized {omitted} messages ({before} → {after} characters).",
+    ))
+
+
 def update_usage(row, raw, env):
     cp = row.checkpoint
     usage = raw.get("usage")
@@ -127,6 +217,18 @@ def update_usage(row, raw, env):
     cp.usage.estimated_cost_cny += cost
     budget = row.state["budget_usage"]
     budget.update(pricing_status="CONFIGURED", price_version=env.get("CUTSIEVE_FLASH_PRICE_VERSION"))
+
+
+def record_model_turn(row, raw, env, summary, duration):
+    cp = row.checkpoint
+    prompt, completion = cp.usage.input_tokens, cp.usage.output_tokens
+    if isinstance(raw, dict):
+        update_usage(row, raw, env)
+    cp.trace_events.append(TraceEvent(
+        kind="MODEL_TURN", step=cp.usage.model_calls, summary=summary,
+        input_tokens=cp.usage.input_tokens - prompt, output_tokens=cp.usage.output_tokens - completion,
+        duration_ms=duration,
+    ))
 
 
 class AgentHarness:
@@ -220,14 +322,24 @@ class AgentHarness:
                 cp.messages.append(dict(role="user", content=reply))
             cp.retry_replies.clear()
             cp.usage.model_calls += 1
+            prepare_history(cp, self.env)
             self.repo.save(db, row)
 
-        raw = self.request_model(config, cp.messages, claim)
-        assistant = decode_assistant(raw, config)
+        started = perf_counter()
+        raw = None
+        try:
+            raw = self.request_model(config, cp.messages, claim)
+            assistant = decode_assistant(raw, config)
+        except EditError as exc:
+            with self.repo.change(claim) as (db, row):
+                record_model_turn(row, raw, self.env, f"Model turn failed with {exc.code}.", elapsed_ms(started))
+                self.repo.save(db, row)
+            raise
+        duration = elapsed_ms(started)
         with self.repo.change(claim) as (db, row):
             cp = row.checkpoint
-            update_usage(row, raw, self.env)
             calls = assistant.get("tool_calls", [])
+            record_model_turn(row, raw, self.env, f"Model returned {len(calls)} tool calls.", duration)
             if cp.usage.tool_calls + len(calls) > cp.usage.max_steps:
                 self.step_limit(db, row)
                 return True
@@ -286,33 +398,39 @@ class AgentHarness:
         self.repo.fail(db, row, "MAX_STEPS_EXCEEDED", "The agent reached its step limit. Narrow the request and start a new turn.")
 
     def execute_tool(self, claim, call):
+        started = perf_counter()
         call_id, name = call["id"], call["function"]["name"]
+        raw = call["function"]["arguments"]
+        args = None
         with self.repo.change(claim) as (db, row):
             cp = row.checkpoint
             if not any(step.tool_call_id == call_id for step in cp.tool_steps):
                 if cp.usage.tool_calls >= cp.usage.max_steps:
                     self.step_limit(db, row)
                     return True
-                step = ToolStep(tool_call_id=call_id, name=name, summary=f"Running {name}")
+                step = ToolStep(tool_call_id=call_id, name=name, summary=f"Running {name}",
+                                args_preview=args_preview(raw), step_index=cp.usage.model_calls)
                 cp.tool_steps.append(step)
                 cp.usage.tool_calls += 1
                 self.repo.save(db, row, ("TOOL_STARTED", step.model_dump()))
         try:
             if name not in TOOLS:
                 raise EditError(422, "UNKNOWN_TOOL", "The requested tool is not available.")
-            args = TOOLS[name][0].model_validate_json(call["function"]["arguments"])
+            args = TOOLS[name][0].model_validate_json(raw)
             tool = getattr(self.tools, name)
             if name in TRANSACTION_TOOLS:
                 with self.repo.change(claim) as (db, row):
                     result = tool(db, row, args, call_id)
                     if isinstance(result, (PendingRender, PendingAsk)):
+                        step = next(item for item in row.checkpoint.tool_steps if item.tool_call_id == call_id)
+                        step.duration_ms = elapsed_ms(started)
                         self.suspend(db, row, result)
                         return True
-                    self.finish_tool(db, row, call_id, name, result)
+                    self.finish_tool(db, row, call_id, name, result, elapsed_ms(started))
                     return False
             result = tool(row, args, call_id) if name == "search_evidence" else tool(row, args)
             with self.repo.change(claim) as (db, row):
-                self.finish_tool(db, row, call_id, name, result)
+                self.finish_tool(db, row, call_id, name, result, elapsed_ms(started))
             return False
         except ValidationError as exc:
             errors = exc.errors(include_url=False, include_input=False)[:3]
@@ -329,13 +447,17 @@ class AgentHarness:
             result = tool_error("MEDIA_UNAVAILABLE", "The requested media data could not be read.",
                                 "Check the available assets and try another source or evidence tool.")
         with self.repo.change(claim) as (db, row):
-            self.finish_tool(db, row, call_id, name, result)
+            if name == "edit_timeline":
+                result.body["details"] = self.tools.edit_recovery(db, row, getattr(args, "edit_project_id", None))
+            self.finish_tool(db, row, call_id, name, result, elapsed_ms(started))
         return False
 
     def suspend(self, db, row, pending):
         cp = row.checkpoint
         cp.lease_failures = 0
         if isinstance(pending, PendingRender):
+            if pending.started_at_ms is None:
+                pending.started_at_ms = round(time() * 1000)
             cp.pending_render_tool_call = pending
             if pending.render_job_id not in cp.render_job_ids:
                 cp.render_job_ids.append(pending.render_job_id)
@@ -376,10 +498,17 @@ class AgentHarness:
                     cp.export_artifact_id = result.body["artifact_id"]
             cp.pending_render_tool_call = None
             row.state.update(status="RUNNING", pending_job_ids=[])
-            self.finish_tool(db, row, pending.tool_call_id, "render_video", result)
+            step = next(item for item in cp.tool_steps if item.tool_call_id == pending.tool_call_id)
+            wait_ms = max(0, round(time() * 1000) - pending.started_at_ms) if pending.started_at_ms else None
+            cp.trace_events.append(TraceEvent(
+                kind="RENDER_WAIT", step=step.step_index or cp.usage.model_calls,
+                summary=f"{pending.profile} render reached {job['status']}.", duration_ms=wait_ms,
+            ))
+            self.finish_tool(db, row, pending.tool_call_id, "render_video", result,
+                             (step.duration_ms or 0) + (wait_ms or 0))
             return False
 
-    def finish_tool(self, db, row, call_id, name, result):
+    def finish_tool(self, db, row, call_id, name, result, duration_ms):
         cp = row.checkpoint
         self.repo.sources.require_readable(db, row.workspace_id, result.related_media)
         cp.remember_media(result.related_media)
@@ -401,7 +530,8 @@ class AgentHarness:
             "get_timeline": "Read timeline", "edit_timeline": "Saved timeline revision",
             "render_video": "Rendered " + result.body.get("profile", "video").lower(),
         }.get(name, name) if ok else result.body["message"]
-        step = cp.finish_tool(call_id, content, summary[:700], ok)
+        step = cp.finish_tool(call_id, content, summary[:700], ok, duration_ms=duration_ms,
+                              error_code=result.body.get("code"), images_added=len(result.images))
         self.repo.save(db, row, ("TOOL_FINISHED", step), *result.notices)
 
     def structured_search(self, claim):

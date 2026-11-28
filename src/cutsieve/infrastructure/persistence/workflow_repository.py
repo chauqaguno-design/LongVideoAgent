@@ -10,7 +10,8 @@ from sqlalchemy import insert, select, update
 from cutsieve.application.edit_timeline import EditError, missing, timestamp, uid
 from cutsieve.application.workflow_checkpoint import Checkpoint, Clarification, RunSpec, Usage
 from cutsieve.application.workflow_state import (
-    DEADLINE_SECONDS, RUNNABLE, TERMINAL, new_state, public_error, require_version, stable_id, sync_usage,
+    DEADLINE_SECONDS, HARNESS_USAGE_FIELDS, RUNNABLE, TERMINAL, new_state, public_error, require_version,
+    stable_id, sync_usage,
 )
 from .edit_repository import job_view, one, owned
 from .edit_tables import jobs, projects
@@ -42,6 +43,9 @@ def compact_tool_body(body, artifact_id):
         if key in compact or isinstance(value, list):
             continue
         excerpt = value[:3300] if isinstance(value, str) else value
+        if key == "details" and isinstance(value, dict):
+            excerpt = tool_excerpt(value)
+            excerpt.update({f"{name}_count": len(items) for name, items in value.items() if isinstance(items, list)})
         if len(encode_tool_text(dict(compact, **{key: excerpt}))) <= TOOL_TEXT_LIMIT - 500:
             compact[key] = excerpt
     for key, values in body.items():
@@ -195,7 +199,7 @@ class WorkflowRepository:
             usage = row.checkpoint.usage.model_copy(update=counts)
             if budget.get("currency") == "CNY":
                 usage.estimated_cost_cny = (budget.get("committed_microunits") or 0) / 1_000_000
-            return dict(row.state, usage=usage.model_dump())
+            return dict(row.state, usage=usage.model_dump(exclude=HARNESS_USAGE_FIELDS))
 
     def history(self, workspace, project, cursor, limit):
         def visible(row):
@@ -244,7 +248,9 @@ class WorkflowRepository:
                 payload = self.tool_content(
                     db, row, pending.tool_call_id, dict(ok=True, question=pending.question, reply=reply)
                 )
-                step = cp.finish_tool(pending.tool_call_id, payload, "Received clarification", True)
+                tool = next(item for item in cp.tool_steps if item.tool_call_id == pending.tool_call_id)
+                step = cp.finish_tool(pending.tool_call_id, payload, "Received clarification", True,
+                                      duration_ms=tool.duration_ms)
                 notices.append(("TOOL_FINISHED", step))
                 cp.pending_ask_tool_call = None
                 deadline = row.deadline + (now - cp.paused_at)
@@ -271,6 +277,7 @@ class WorkflowRepository:
         for step in cp.tool_steps:
             if step.status == "RUNNING":
                 step.status, step.ok = "CANCELLED", False
+                step.error_code = "CANCELLED"
         row.state["pending_job_ids"] = []
 
     def fail(self, db, row, code, message, retryable=False):

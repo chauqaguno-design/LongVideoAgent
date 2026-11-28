@@ -7,16 +7,17 @@ import json
 import os
 import shutil
 import sys
+from subprocess import TimeoutExpired
 from PIL import Image
 
 from cutsieve.application.media_sampling import (
+    adaptive_points,
     coverage,
     identity,
-    sample_points,
     segment_bounds,
     segments,
     windows,
-    frame_quotas,
+    static_duplicate,
     POLICY,
 )
 from cutsieve.application.media_memory import (
@@ -27,6 +28,7 @@ from cutsieve.application.media_memory import (
 from cutsieve.infrastructure.edit_captions import Cue, write_srt
 from cutsieve.infrastructure.persistence.processing_catalog import record
 from .source_artifacts import command, digest_file
+from .local_inference import asr_model_config
 from cutsieve.infrastructure.persistence.media_visual_budget import billed_window
 from .visual_observations import (
     visual_deployment,
@@ -39,16 +41,25 @@ US = 1_000_000
 CAPABILITIES = ("asr", "ocr", "visual_observation", "text_embedding", "image_embedding")
 
 
-def local_models():
+def local_models(env=None):
     """Only explicitly provisioned local weights may be loaded by this pipeline."""
-    return {
-        k: os.getenv(v) or ""
-        for k, v in {
-            "python": "CUTSIEVE_MEDIA_PYTHON",
-            "asr": "CUTSIEVE_WHISPER_DIR",
-            "ocr": "CUTSIEVE_PADDLE_OCR_DIR",
-        }.items()
-    }
+    env = os.environ if env is None else env
+    root, interpreter = asr_model_config(env)
+    return dict(python=env.get("CUTSIEVE_MEDIA_PYTHON") or sys.executable,
+                asr=root, asr_python=interpreter, ocr=env.get("CUTSIEVE_PADDLE_OCR_DIR") or "")
+
+
+def asr_version(interpreter, stopped=None):
+    try:
+        version, _ = command([
+            interpreter, "-I", "-c",
+            "import faster_whisper; from importlib.metadata import version; print(version('faster-whisper'))",
+        ], stopped, timeout=20)
+    except InterruptedError:
+        raise
+    except (OSError, ValueError, TimeoutExpired):
+        return None
+    return version.decode().strip()
 
 
 class ProcessingUnits:
@@ -61,7 +72,6 @@ class ProcessingUnits:
             Path(temp),
         )
         self.spans = windows(source.probe["duration_us"])
-        self.quotas = frame_quotas(len(self.spans), run.config.get("_frame_budget", 4096))
         self.folder = catalog.root / run.asset
         self.files = self.folder / "files"
         self.files.mkdir(parents=True, exist_ok=True)
@@ -75,7 +85,7 @@ class ProcessingUnits:
         self.problems = []
         self.proxy = {}
         self.units = {r.unit: r.body for r in catalog.entries(run, "CHECKPOINT")}
-        self.total = len(self.spans) * 5 + 4
+        self.total = len(self.spans) + 5
         self.visual_budget = min(32, max(0, int(os.getenv("CUTSIEVE_MEDIA_VISUAL_MAX_WINDOWS", "8"))))
         if "visual_observation" in self.config["requested_capabilities"]:
             self.total += min(self.visual_budget, len(self.spans))
@@ -194,13 +204,11 @@ class ProcessingUnits:
         )
         self.units[unit] = body
 
-    def decode_frame(self, at):
+    def decode_frame(self, at, previous_signature):
         pts = self.reader.frame_pts(at)
         token = f"frame-{pts}"
         artifact_id = identity(self.run.id, "artifact:" + token)
         previous = self.catalog.get_record(self.run.workspace, artifact_id, "ARTIFACT")
-        if previous:
-            return previous.body["frame"], []
         path = self.temp / "frame.jpg"
         path.unlink(missing_ok=True)
         cache = self.folder / "cache"
@@ -209,11 +217,21 @@ class ProcessingUnits:
             f"{self.source.digest}:frame-v1:{self.reader.version}:{pts}".encode()
         ).hexdigest()
         cached = cache / (cache_key + ".jpg")
-        if cached.is_file():
+        if previous:
+            path = self.catalog.derived_path(previous.body["file"])
+            actual = previous.body["frame"]["actual_us"]
+        elif cached.is_file():
             path = cached
             actual = round((pts * self.reader.raw_timebase - self.reader.origin) * US)
         else:
             actual = self.reader.save_frame(pts, path)
+        with Image.open(path) as image:
+            signature = image.convert("RGB").resize((8, 8), Image.Resampling.BOX).tobytes()
+        if static_duplicate(previous_signature, signature):
+            return None, [], previous_signature
+        if previous:
+            return previous.body["frame"], [], signature
+        if path != cached:
             try:
                 os.link(path, cached)
             except FileExistsError:
@@ -251,9 +269,21 @@ class ProcessingUnits:
             ref_file=item["body"]["file"],
             support="NOT_CHECKED",
         )
-        return frame, [item, *ev]
+        return frame, [item, *ev], signature
 
     def frames(self):
+        plan_key = "adaptive-frame-plan"
+        if plan_key not in self.units:
+            try:
+                cuts = self.reader.scene_points()
+            except (ValueError, TimeoutExpired):
+                cuts = []
+            duration = self.source.probe["duration_us"]
+            points = adaptive_points(duration, cuts, self.config.get("_frame_budget", 2048))
+            self.save(plan_key, "SAMPLING", state={"points": points})
+        points = iter(self.units[plan_key]["points"])
+        at = next(points, None)
+        signature = None
         for i, span in enumerate(self.spans):
             cov = coverage(self.run, i, span, "PLANNED")
             self.catalog.commit(
@@ -271,37 +301,35 @@ class ProcessingUnits:
                 stage="SAMPLING",
                 total=self.total,
             )
-        # Reserve one pass across every window before spending the next frame anywhere.
-        for slot in range(5):
-            for i, span in enumerate(self.spans):
-                unit = f"frames:{i}:{slot}"
-                if unit in self.units:
-                    continue
-                try:
-                    quota = self.quotas[i]
-                    if slot < 4 and slot >= quota:
-                        self.save(unit, "SAMPLING", state={"failure": "采样预算不足"})
+            candidates = []
+            while at is not None and at < span[1]:
+                candidates.append(at)
+                at = next(points, None)
+            unit = f"frames:{i}:0"
+            if unit in self.units and "signature" not in self.units[unit]:
+                unit = f"frames:{i}:adaptive"
+            if unit not in self.units:
+                frames, items, failures = [], [], 0
+                for point in candidates:
+                    try:
+                        frame, derived, signature = self.decode_frame(point, signature)
+                    except (ValueError, OSError, TimeoutExpired) as exc:
+                        if isinstance(exc, InterruptedError):
+                            raise
+                        failures += 1
                         continue
-                    if slot < 4:
-                        points = [sample_points(*span, slot)]
-                    else:
-                        points = self.reader.scene_points(*span)[: quota - 4] if quota > 4 else []
-                    frames = []
-                    items = []
-                    for at in points:
-                        frame, derived = self.decode_frame(at)
+                    if frame:
                         frames.append(frame)
                         items.extend(derived)
-                    self.save(unit, "SAMPLING", items, dict(frames=frames))
-                except (ValueError, OSError) as exc:
-                    if isinstance(exc, InterruptedError):
-                        raise
-                    self.save(unit, "SAMPLING", state={"failure": "当前窗口无法完整解码"})
-        for i, span in enumerate(self.spans):
-            units = [self.units[f"frames:{i}:{slot}"] for slot in range(5)]
-            unique = {f["artifact_id"]: f for u in units for f in u.get("frames", [])}
-            stage = "FAILED" if any("failure" in u for u in units) else "DECODED"
-            reason = next((u["failure"] for u in units if u.get("failure")), None)
+                state = dict(frames=frames, signature=signature.hex() if signature is not None else None)
+                if failures:
+                    state["failure"] = "当前窗口无法完整解码"
+                self.save(unit, "SAMPLING", items, state)
+            unit_state = self.units[unit]
+            signature = bytes.fromhex(unit_state["signature"]) if unit_state["signature"] is not None else None
+            unique = {f["artifact_id"]: f for f in self.window_frames(i)}
+            reason = unit_state.get("failure")
+            stage = "FAILED" if reason else "DECODED"
             if reason:
                 self.problems.append(reason)
             c = coverage(self.run, i, span, stage, unique.values(), reason)
@@ -318,6 +346,10 @@ class ProcessingUnits:
                     )
                 ],
             )
+
+    def window_frames(self, index):
+        return [frame for slot in (0, 1, 2, 3, 4, "adaptive")
+                for frame in self.units.get(f"frames:{index}:{slot}", {}).get("frames", [])]
 
     def ensure_proxy(self):
         if "proxy" in self.units:
@@ -379,19 +411,19 @@ class ProcessingUnits:
         root = Path(self.models.get(mode) or "")
         if not self.models.get(mode) or not root.is_dir():
             return None
-        interpreter = self.models["python"] or sys.executable
+        interpreter = (self.models.get("asr_python") if mode == "asr" else None) or self.models["python"] or sys.executable
         package = "faster-whisper" if mode == "asr" else "paddleocr"
-        version, _ = command(
-            [
-                interpreter,
-                "-I",
-                "-c",
-                f"from importlib.metadata import version;print(version('{package}'))",
-            ],
-            self.reader.stopped,
-        )
+        if mode == "asr":
+            version = asr_version(interpreter, self.reader.stopped)
+            if not version:
+                return None
+        else:
+            output, _ = command([interpreter, "-I", "-c",
+                                 "from importlib.metadata import version; print(version('paddleocr'))"],
+                                self.reader.stopped)
+            version = output.decode().strip()
         adapter = Path(__file__).with_name("local_inference.py")
-        model_stamp = sha256(f"{root.resolve()}:{package}:{version.decode().strip()}".encode()).hexdigest()
+        model_stamp = sha256(f"{root.resolve()}:{package}:{version}".encode()).hexdigest()
         # Cache against the source revision, input bytes and configured model installation.
         cache = self.folder / "cache"
         cache.mkdir(parents=True, exist_ok=True)
@@ -419,7 +451,7 @@ class ProcessingUnits:
             tasks.append(dict(path=str(path), output=str(cache / (key + ".json"))))
         spec = self.temp / (mode + ".json")
         spec.write_text(
-            json.dumps(dict(mode=mode, model=str(root), checkpoint=model_stamp, inputs=tasks)),
+            json.dumps(dict(mode=mode, model=str(root.resolve()), checkpoint=model_stamp, inputs=tasks)),
             encoding="utf8",
         )
         command([interpreter, "-I", adapter, spec], self.reader.stopped, timeout=7200)
@@ -601,7 +633,9 @@ class ProcessingUnits:
             window = sorted(
                 (r for r in frames if start <= r.body["frame"]["actual_us"] < end),
                 key=lambda r: r.body["frame"]["actual_us"],
-            )[:8]
+            )
+            if len(window) > 8:
+                window = [window[(2 * j + 1) * len(window) // 16] for j in range(8)]
             if not window:
                 continue
             by_id = {r.id: r for r in window}
@@ -781,7 +815,7 @@ class ProcessingUnits:
                 if ok and name == "asr" and self.source.probe["audio_index"] is None:
                     stage = "DECODED"
                 frame_data = (
-                    [f for slot in range(5) for f in self.units[f"frames:{i}:{slot}"].get("frames", [])]
+                    self.window_frames(i)
                     if name != "asr"
                     else []
                 )

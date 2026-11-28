@@ -7,6 +7,7 @@ from cutsieve.application.edit_timeline import EditError, uid
 from cutsieve.application.render_formats import EXPORT_FORMATS
 from cutsieve.infrastructure.persistence.edit_repository import EditRepository, job_view, project_view
 from cutsieve.infrastructure.persistence.edit_tables import jobs, projects, revisions
+from cutsieve.application.edit_timeline import revision_view
 from cutsieve.infrastructure.persistence.render_worker import RenderWorker
 from .edit_sources import signature
 from .schemas import CancelRequest, EditProjectCreate, RenderJobCreate, TimelinePatch
@@ -44,11 +45,11 @@ def install_edit_routes(app, workspace_user):
     def list_revisions(edit_project_id: str, scope=Depends(workspace), cursor: str | None=None,
                        limit: int=Query(20, ge=1, le=100)):
         repo.get(projects, scope, edit_project_id, project_view)
-        return repo.page(revisions, scope, lambda r: r.snapshot, dict(edit_id=edit_project_id), cursor, limit)
+        return repo.page(revisions, scope, revision_view, dict(edit_id=edit_project_id), cursor, limit)
 
     @router.get("/edit-projects/{edit_project_id}/revisions/{revision_id}")
     def get_revision(edit_project_id: str, revision_id: str, scope=Depends(workspace)):
-        return repo.get(revisions, scope, revision_id, lambda r: r.snapshot, edit_id=edit_project_id)
+        return repo.get(revisions, scope, revision_id, revision_view, edit_id=edit_project_id)
 
     @router.post("/edit-projects/{edit_project_id}/operations", status_code=201)
     def patch(edit_project_id: str, body: TimelinePatch, scope=Depends(workspace)):

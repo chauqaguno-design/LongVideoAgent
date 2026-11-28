@@ -9,6 +9,7 @@ from .edit_timeline import EditError, uid
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "SUPERSEDED"}
 RUNNABLE = {"QUEUED", "RUNNING", "WAITING_JOB"}
 DEADLINE_SECONDS = 300
+HARNESS_USAGE_FIELDS = {"images_unloaded", "compactions"}
 
 
 def utc(epoch):
@@ -42,7 +43,7 @@ def new_state(run_id, workspace, project, usage, legacy_limits=None):
 
 
 def sync_usage(state, usage):
-    counts = usage.model_dump()
+    counts = usage.model_dump(exclude=HARNESS_USAGE_FIELDS)
     state["usage"] = counts
     budget = state["budget_usage"]
     for key in ("model_calls", "tool_calls", "images", "input_tokens", "output_tokens"):

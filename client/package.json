@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test src/*.test.js",
+    "test": "node --test src/*.test.js && npm run test:components",
     "preview": "vite preview",
     "test:components": "vitest run --config vitest.config.js",
     "test:e2e:edit": "node --test e2e/edit.mjs",
